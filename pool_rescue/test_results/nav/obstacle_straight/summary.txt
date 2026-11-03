@@ -1,0 +1,10 @@
+== obstacle_straight (expect success): PASS
+   status: GOAL_RECEIVED -> TRAJECTORY_PUBLISHED -> TRAJECTORY_COMPLETE
+   [PASS] trajectory published -- GOAL_RECEIVED -> TRAJECTORY_PUBLISHED -> TRAJECTORY_COMPLETE
+   [PASS] trajectory completed 
+   [PASS] goal reached (position) -- 0.004 m < 0.30 m
+   [PASS] goal reached (heading) -- 0.000 rad < 0.20 rad
+   [PASS] actual hull never touches an obstacle or wall -- min hull clearance 0.545 m
+   [PASS] actual collision circle never touches (verification radius r) -- min circle clearance 0.272 m (margin target 0.30 m)
+   [PASS] planned path circle clearance >= 0 -- 0.271 m
+   [PASS] tracking error < 0.30 m -- 0.002 m

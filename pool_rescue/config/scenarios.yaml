@@ -1,0 +1,56 @@
+# Static-obstacle scenarios for pool_nav.launch (scenario:=<name>) and scripts/nav_tests.py.
+# Pool frame: origin at the standby corner, x along the 25 m length, y along the 12.5 m width.
+# Obstacles are boxes [cx, cy, sx, sy, yaw] in m / rad (same format as global_map_node map_box); the pool walls are
+# added by gen_ddr_params.py. Lane ropes are never obstacles. Every run starts at the standby pose (1.2, 1.2, 0).
+# expect: success = goal reached without collision; failure = planner must report failure and the vessel stay still.
+#
+# Clearance arithmetic for the defaults (r = 0.583 m collision radius, m = 0.30 m margin, r + m = 0.883 m):
+#   a gap is plannable only if it is wider than 2 (r + m) = 1.77 m (plus grid quantisation).
+scenarios:
+  empty:
+    description: "walls only (default for interactive use)"
+    obstacles: []
+    goal: []          # no goal (the parameter server cannot store null)
+    expect: none
+
+  obstacle_straight:
+    description: "1 x 3 m block on the straight line start -> goal; the gap to the y=0 wall (0.5 m) is too small, so the vessel must go around the top"
+    obstacles:
+      - {name: block, box: [10.0, 2.0, 1.0, 3.0, 0.0]}
+    goal: [20.0, 2.0, 0.0]
+    expect: success
+
+  near_wall:
+    description: "run along the y=0 wall to the far corner; goal centre 1.1 m from both walls (hull-circle clearance ~0.52 m)"
+    obstacles: []
+    goal: [23.8, 1.1, 0.0]
+    expect: success
+
+  near_wall_too_close:
+    description: "goal centre 0.6 m from the y=0 wall: inside r + m, so no admissible plan exists"
+    obstacles: []
+    goal: [23.8, 0.6, 0.0]
+    expect: failure
+
+  narrow_passage:
+    description: "barrier across the pool at x=12 with a 2.2 m gap (> 2(r+m) = 1.77 m)"
+    obstacles:
+      - {name: barrier_low,  box: [12.0, 2.575, 0.4, 5.15, 0.0]}
+      - {name: barrier_high, box: [12.0, 9.925, 0.4, 5.15, 0.0]}
+    goal: [20.0, 6.25, 0.0]
+    expect: success
+
+  narrow_too_tight:
+    description: "same barrier with a 1.4 m gap: wider than the hull (0.6 m) and the collision circle (1.17 m) but < 2(r+m); the conservative circle model must refuse it"
+    obstacles:
+      - {name: barrier_low,  box: [12.0, 2.775, 0.4, 5.55, 0.0]}
+      - {name: barrier_high, box: [12.0, 9.725, 0.4, 5.55, 0.0]}
+    goal: [20.0, 6.25, 0.0]
+    expect: failure
+
+  blocked:
+    description: "barrier across the full pool width at x=12: goal unreachable"
+    obstacles:
+      - {name: barrier, box: [12.0, 6.25, 0.4, 12.5, 0.0]}
+    goal: [20.0, 6.25, 0.0]
+    expect: failure

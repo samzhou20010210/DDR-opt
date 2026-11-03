@@ -3,9 +3,9 @@
 ICR_xv: 0.0
 ICR_yl: 0.25
 ICR_yr: -0.25
-checkpoint: [0.5, 0.3, 0.5, 0.0, 0.5, -0.3, 0.0, -0.3, -0.5, -0.3, -0.5, 0.0, -0.5, 0.3, 0.0, 0.3]
+checkpoint: [0.0, 0.0]
 detection_range: 30.0
-finalMinSafeDis: 0.3
+finalMinSafeDis: 0.583095
 global_x_lower: 0.0
 global_x_upper: 25.0
 global_y_lower: 0.0
@@ -17,7 +17,7 @@ if_directly_constrain_v_omega: false
 if_fix_final: false
 if_perspective: true
 if_standard_diff: true
-jps_safe_dis: 0.6
+jps_safe_dis: 0.883095
 max_acc: 0.25
 max_centripetal_acc: 0.2
 max_domega: 0.5
@@ -26,4 +26,4 @@ max_replan_time: 0.05
 max_vel: 0.5
 min_vel: -0.2
 replan_time: 5000.0
-safeDis: 0.3
+safeDis: 0.883095

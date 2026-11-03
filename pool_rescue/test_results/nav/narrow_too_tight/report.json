@@ -1,0 +1,53 @@
+{
+  "scenario": "narrow_too_tight",
+  "description": "same barrier with a 1.4 m gap: wider than the hull (0.6 m) and the collision circle (1.17 m) but < 2(r+m); the conservative circle model must refuse it",
+  "expect": "failure",
+  "goal": [
+    20.0,
+    6.25,
+    0.0
+  ],
+  "status_sequence": [
+    "GOAL_RECEIVED",
+    "FAILED_NO_PATH"
+  ],
+  "collision_radius_m": 0.58309518948453,
+  "margin_m": 0.3,
+  "checks": [
+    {
+      "name": "failure reported explicitly",
+      "pass": true,
+      "detail": "GOAL_RECEIVED -> FAILED_NO_PATH"
+    },
+    {
+      "name": "no trajectory published",
+      "pass": true,
+      "detail": "0 published"
+    },
+    {
+      "name": "no non-zero motion command",
+      "pass": true,
+      "detail": "0 non-zero /pool/cmd_vel"
+    },
+    {
+      "name": "vessel stayed stationary",
+      "pass": true,
+      "detail": "displacement 0.00e+00 m"
+    }
+  ],
+  "actual": {
+    "start": [
+      1.2,
+      1.2,
+      0.0
+    ],
+    "end": [
+      1.2,
+      1.2,
+      0.0
+    ],
+    "displacement_m": 0.0
+  },
+  "trajectories_published": 0,
+  "pass": true
+}

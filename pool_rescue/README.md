@@ -12,13 +12,74 @@ python3 pool_rescue/scripts/check_params.py                # offline: schema, sa
 rosrun pool_rescue check_params.py --live --mode approach  # against a running stack (also run by the launch file)
 ```
 
-There are two independent stacks. **Never launch both at once**: each one has its own single publisher of
+There are three independent stacks. **Launch only one at a time**: each has its own single publisher of
 `/pool/robot/odom` and of the `world→base_link` TF.
 
 | Launch | What runs | Owner of `/pool/robot/odom` and `world→base_link` |
 |---|---|---|
+| `pool_nav.launch` (**main**) | `pool_env` + `hull_sim` + DDR-opt planner + MPC + map + laser + `nav_bridge`; no legacy simulator, no EKF | `hull_sim` |
 | `pool_hull_sim.launch` | `pool_env` + `hull_sim` (no planner) | `hull_sim` |
 | `pool_sim.launch` | DDR-opt planner, MPC, legacy simulator, EKF + `ddr_adapter` | `ddr_adapter` |
+
+## N. Navigation: DDR-opt driving the hull (`pool_nav.launch`)
+
+```bash
+roslaunch pool_rescue pool_nav.launch scenario:=narrow_passage [mode:=approach|rescue] [gui:=false]
+pool_rescue/scripts/run_nav_scenarios.sh [--mode M] [--out DIR] [scenario ...]   # headless, all scenarios by default
+```
+
+Data flow:
+
+```
+hull_sim --/pool/robot/odom (Odometry, ground truth)--> global_planning, mpc, nav_bridge
+nav_bridge --/pool/internal/sensor_pose (CarState)--> laser_simulator --/laser_simulator/local_pointcloud--> global_planning
+global_planning --/planner/traj_poly--> mpc --/pool/internal/mpc_cmd (CarState)--> nav_bridge --/pool/cmd_vel (Twist)--> hull_sim
+global_planning --/planner/status (String, latched)
+```
+
+- The legacy DDR-opt `simulator` and the ICR-EKF are not started. The live check (`--stack nav`) verifies that.
+- The DDR-opt front end (JPS), back end (MINCO + L-BFGS) and MPC are reused unchanged.
+- `nav_bridge` applies no latency (`hull_sim` owns it) and publishes no TF.
+
+**Collision model.** It is defined once in `gen_ddr_params.clearances()`; nothing else adds inflation:
+
+| Quantity | Definition | Default | Where it is applied |
+|---|---|---|---|
+| collision radius r | hypot(length/2, width/2): circle enclosing the hull (derived, not configured) | 0.583 m | |
+| safety margin m | `safety.margin` | 0.30 m | |
+| planning clearance | r + m | 0.883 m | JPS blocks cells with ESDF < r + m (`jps_safe_dis`); optimizer penalises centre ESDF < r + m (`safeDis`, one checkpoint at the centre) |
+| verification clearance | r | 0.583 m | `finalMinSafeDis`: a trajectory whose centre comes closer than r is rejected before publishing |
+| map inflation | none | 0 | the grid/ESDF hold the true obstacle geometry |
+
+- A gap is plannable only if it is wider than about 2(r + m) = 1.77 m. The circle is conservative: a 1.4 m gap
+  that the 0.6 m-wide hull could physically pass is refused.
+- Lane ropes (`pool.lanes`) are drawn in RViz only and are never added to the map.
+
+**Planner status** (`/planner/status`, latched `std_msgs/String`). This is the only DDR-opt code change for this
+stage (`plan_manager.hpp`):
+
+| Status | Meaning |
+|---|---|
+| `GOAL_RECEIVED` | goal accepted |
+| `TRAJECTORY_PUBLISHED` | trajectory planned and sent to the MPC |
+| `TRAJECTORY_COMPLETE` | trajectory finished |
+| `FAILED_NO_PATH` | JPS found no path |
+| `FAILED_TRAJECTORY_INFEASIBLE` | optimized trajectory failed the final collision check |
+| `GOAL_REJECTED_BUSY` | a goal arrived while a trajectory was running |
+| `EMERGENCY_STOP_COLLISION` | centre inside an obstacle |
+
+On any `FAILED_*`: no trajectory is published, the goal is dropped, the planner returns to idle, and an emergency
+stop is sent if a trajectory was already running. The MPC therefore sends no commands, and `hull_sim`'s
+`cmd_timeout` keeps the vessel still.
+
+**Scenarios** (`config/scenarios.yaml`). Each scenario lists static boxes, a goal and the expected outcome. The
+generator writes `config/generated/scenarios/<name>.yaml` (walls + boxes) for `global_map_node`.
+`scripts/nav_tests.py` sends the goal and records status, trajectories, the planned path, commands and ground truth.
+It then computes true hull-rectangle and collision-circle clearances to every box and the pool edge.
+- A success scenario requires the goal reached with no contact.
+- A failure scenario requires an explicit `FAILED_*`, no trajectory, no non-zero command, and zero displacement.
+
+Recorded results: `test_results/nav/`.
 
 ## 0. Pool environment and hull simulator (`pool_hull_sim.launch`)
 
@@ -47,7 +108,7 @@ publishes, latched:
 | Integration | unicycle at `simulation.hull_sim_rate` (trapezoidal v/ω, midpoint heading); no sway, drag or currents |
 | Lost link | no command for `control.cmd_timeout` → target (0, 0) |
 | Walls | the hull rectangle (`vessel.length × width`) must stay inside the pool. A step that would push a corner out is rejected (pose kept, v = ω = 0, `/pool/robot/wall_contact` = true). Contact stays latched while the same target keeps arriving; any other target may move the hull again |
-| Startup | the node exits with an error unless the whole hull at the standby pose is ≥ `safety.wall_clearance` from every wall |
+| Startup | the node exits with an error unless the whole hull at the standby pose is ≥ `safety.margin` from every wall |
 | Output | `/pool/robot/odom` (`Odometry`, stamped, `world`→`base_link`, body-frame twist), TF `world→base_link`, `/pool/hull_sim/target` (`TwistStamped`: target after latency + clamping), `/pool/robot/wall_contact` (`Bool`, latched), `/pool/robot/trajectory` (`Path`, every `simulation.trajectory_period`), `/pool/robot/hull_markers` (outline + heading arrow in `base_link`) |
 | Service | `/hull_sim/reset` (`std_srvs/Empty`) |
 

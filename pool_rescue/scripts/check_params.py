@@ -28,15 +28,34 @@ MPC_KEYS = ["du_threshold", "dt", "max_iter", "predict_steps", "max_omega", "max
             "min_vel", "max_acc", "delay_num", "cmd_timer_rate", "max_mpc_time", "if_mpc",
             "matrix_q", "matrix_r", "matrix_rd"]
 
-# Agreed interfaces: topic -> (type, required single publisher or None)
-INTERFACES = {
-    "/pool/robot/odom": ("nav_msgs/Odometry", "/ddr_adapter"),
-    "/pool/robot/odom_truth": ("nav_msgs/Odometry", "/ddr_adapter"),
-    "/pool/cmd_vel": ("geometry_msgs/Twist", "/ddr_adapter"),
-    "/planner/traj_poly": ("carstatemsgs/Polynome", "/global_planning"),
+# Per launch stack: legacy nodes whose generated params must be applied, agreed interfaces
+# (topic -> (type, single publisher)), TF owners (child frame -> single publisher), nodes that must NOT run.
+STACKS = {
+    "ddr": {   # pool_sim.launch: legacy DDR-opt simulator + EKF + ddr_adapter
+        "nodes": ["global_planning", "simulator", "mpc", "global_map_node", "laser_simulator", "icrekf", "ddr_adapter"],
+        "interfaces": {
+            "/pool/robot/odom": ("nav_msgs/Odometry", "/ddr_adapter"),
+            "/pool/robot/odom_truth": ("nav_msgs/Odometry", "/ddr_adapter"),
+            "/pool/cmd_vel": ("geometry_msgs/Twist", "/ddr_adapter"),
+            "/planner/traj_poly": ("carstatemsgs/Polynome", "/global_planning"),
+            "/planner/status": ("std_msgs/String", "/global_planning"),
+        },
+        "tf_owners": {"base_link": "/ddr_adapter", "laser": "/laser_simulator"},
+        "absent": [],
+    },
+    "nav": {   # pool_nav.launch: DDR-opt planner + MPC driving hull_sim via nav_bridge
+        "nodes": ["global_planning", "mpc", "global_map_node", "laser_simulator"],
+        "interfaces": {
+            "/pool/robot/odom": ("nav_msgs/Odometry", "/hull_sim"),
+            "/pool/cmd_vel": ("geometry_msgs/Twist", "/nav_bridge"),
+            "/pool/internal/sensor_pose": ("carstatemsgs/CarState", "/nav_bridge"),
+            "/planner/traj_poly": ("carstatemsgs/Polynome", "/global_planning"),
+            "/planner/status": ("std_msgs/String", "/global_planning"),
+        },
+        "tf_owners": {"base_link": "/hull_sim", "laser": "/laser_simulator"},
+        "absent": ["/simulator", "/icrekf", "/ddr_adapter"],
+    },
 }
-# TF child frame -> its single expected publisher
-TF_OWNERS = {"base_link": "/ddr_adapter", "laser": "/laser_simulator"}
 
 
 class Report:
@@ -95,8 +114,20 @@ def offline(rep):
     reach = math.hypot(hl, hw)
     sx, sy = v("standby.x"), v("standby.y")
     margin = min(sx, sy, L - sx, W - sy) - reach - v("pool.wall_thickness_in_map") / 2
-    rep.check(margin >= v("safety.wall_clearance"), "standby pose clear of walls",
-              "worst-case clearance {:.2f} m >= {:.2f} m".format(margin, v("safety.wall_clearance")))
+    rep.check(margin >= v("safety.margin"), "standby pose: hull clear of walls by the safety margin",
+              "worst-case hull-wall clearance {:.2f} m >= {:.2f} m".format(margin, v("safety.margin")))
+    clr = gen.clearances(cfg)
+    centre = min(sx, sy, L - sx, W - sy) - v("pool.wall_thickness_in_map") / 2
+    rep.check(centre >= clr["planning"], "standby centre plannable (>= r + m from walls in the map)",
+              "centre clearance {:.3f} m >= r + m = {:.3f} m (r = {:.3f}, m = {:.2f})".format(
+                  centre, clr["planning"], clr["collision_radius"], clr["margin"]))
+    lanes = v("pool.lanes.count") * v("pool.lanes.lane_width") + 2 * v("pool.lanes.outer_space")
+    rep.check(abs(lanes - W) < 1e-9, "lanes fill the pool width", "{} x {} + 2 x {} = {} m (pool {} m)".format(
+        v("pool.lanes.count"), v("pool.lanes.lane_width"), v("pool.lanes.outer_space"), lanes, W))
+    for name, sc in gen.load_scenarios().items():
+        g = sc.get("goal")
+        if g:
+            rep.check(0 < g[0] < L and 0 < g[1] < W, "scenario %s: goal inside pool" % name, str(g))
     ez = [v("extraction_zone." + k) for k in ("x", "y")]
     rep.check(0 < ez[0] < L and 0 < ez[1] < W, "extraction zone centre inside pool", str(ez))
 
@@ -106,12 +137,7 @@ def offline(rep):
               "delay_num={} x dt={} = {:.3f} s".format(steps, dt, steps * dt))
 
     # 3. generated files current
-    stale = []
-    for mode in gen.MODES:
-        for node, params in gen.build(cfg, mode).items():
-            path = os.path.join(gen.OUT_DIR, mode, node + ".yaml")
-            if not os.path.exists(path) or open(path).read() != gen.render(mode, node, params):
-                stale.append(os.path.relpath(path, gen.PKG))
+    stale = [os.path.relpath(p_, gen.PKG) for p_ in gen.stale_files(cfg)]
     rep.check(not stale, "generated files up to date", ", ".join(stale) or "")
     return cfg
 
@@ -126,7 +152,7 @@ def same(a, b):
     return a == b
 
 
-def live(rep, mode, wait):
+def live(rep, mode, wait, stack="ddr", scenario=None):
     import rosgraph
     import rospy
     from tf2_msgs.msg import TFMessage
@@ -151,9 +177,12 @@ def live(rep, mode, wait):
     # 1. every legacy node received the generated values
     state = master.getSystemState()  # (publishers, subscribers, services)
     nodes = {n for section in state for _, ns in section for n in ns}
-    for fname in sorted(os.listdir(os.path.join(gen.OUT_DIR, mode))):
-        node = "/" + fname[:-5]
-        want = yaml.safe_load(open(os.path.join(gen.OUT_DIR, mode, fname)))
+    spec = STACKS[stack]
+    for name in spec["nodes"]:
+        node = "/" + name
+        want = yaml.safe_load(open(os.path.join(gen.OUT_DIR, mode, name + ".yaml")))
+        if name == "global_map_node" and scenario:
+            want.update(yaml.safe_load(open(os.path.join(gen.OUT_DIR, "scenarios", scenario + ".yaml"))))
         rep.check(node in nodes, "node running: " + node)
         bad = []
         for k, val in want.items():
@@ -163,6 +192,9 @@ def live(rep, mode, wait):
             elif not same(rospy.get_param(key), val):
                 bad.append("{}={!r} (want {!r})".format(k, rospy.get_param(key), val))
         rep.check(not bad, "params applied: {} ({} keys)".format(node, len(want)), "; ".join(bad))
+
+    for node in spec["absent"]:
+        rep.check(node not in nodes, "node NOT running (disabled in this stack): " + node)
 
     # 2. mpc_controller's hard-coded /mpc namespace
     missing = [k for k in MPC_KEYS if not rospy.has_param("/mpc/" + k)]
@@ -181,7 +213,7 @@ def live(rep, mode, wait):
         callers = set().union(*parents.values())
         rep.check(len(parents) == 1 and len(callers) == 1, "TF single publisher: {} -> {}".format(
             "/".join(parents), child), "publishers: " + ", ".join(sorted(callers)))
-    for child, owner in TF_OWNERS.items():
+    for child, owner in spec["tf_owners"].items():
         got = set().union(*tf_pubs.get(child, {}).values()) if child in tf_pubs else set()
         parent = list(tf_pubs.get(child, {"-": None}))[0]
         rep.check(got == {owner} and parent == "world", "TF world -> {} owned by {}".format(child, owner),
@@ -190,7 +222,7 @@ def live(rep, mode, wait):
     # 5. interface topics: type and single publisher
     types = dict(master.getTopicTypes())
     pubs = {t: set(ns) for t, ns in master.getSystemState()[0]}
-    for topic, (typ, owner) in INTERFACES.items():
+    for topic, (typ, owner) in spec["interfaces"].items():
         rep.check(types.get(topic) == typ and pubs.get(topic, set()) == {owner},
                   "interface {} : {}".format(topic, typ),
                   "type={} publishers={}".format(types.get(topic), sorted(pubs.get(topic, []))))
@@ -205,6 +237,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--live", action="store_true")
     ap.add_argument("--mode", default="approach", choices=gen.MODES)
+    ap.add_argument("--stack", default="ddr", choices=sorted(STACKS), help="live: which launch stack is running")
+    ap.add_argument("--scenario", default=None, help="live, nav stack: scenario whose map_box must be loaded")
     ap.add_argument("--wait", type=float, default=30.0, help="live: max seconds to wait for the stack")
     try:
         import rospy
@@ -215,7 +249,7 @@ def main():
     rep = Report()
     offline(rep)
     if a.live:
-        live(rep, a.mode, a.wait)
+        live(rep, a.mode, a.wait, a.stack, a.scenario)
     sys.exit(0 if rep.done() else 1)
 
 

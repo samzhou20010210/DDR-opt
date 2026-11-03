@@ -1,0 +1,6 @@
+== blocked (expect failure): PASS
+   status: GOAL_RECEIVED -> FAILED_NO_PATH
+   [PASS] failure reported explicitly -- GOAL_RECEIVED -> FAILED_NO_PATH
+   [PASS] no trajectory published -- 0 published
+   [PASS] no non-zero motion command -- 0 non-zero /pool/cmd_vel
+   [PASS] vessel stayed stationary -- displacement 0.00e+00 m

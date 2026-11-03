@@ -1,0 +1,86 @@
+{
+  "scenario": "obstacle_straight",
+  "description": "1 x 3 m block on the straight line start -> goal; the gap to the y=0 wall (0.5 m) is too small, so the vessel must go around the top",
+  "expect": "success",
+  "goal": [
+    20.0,
+    2.0,
+    0.0
+  ],
+  "status_sequence": [
+    "GOAL_RECEIVED",
+    "TRAJECTORY_PUBLISHED",
+    "TRAJECTORY_COMPLETE"
+  ],
+  "collision_radius_m": 0.58309518948453,
+  "margin_m": 0.3,
+  "checks": [
+    {
+      "name": "trajectory published",
+      "pass": true,
+      "detail": "GOAL_RECEIVED -> TRAJECTORY_PUBLISHED -> TRAJECTORY_COMPLETE"
+    },
+    {
+      "name": "trajectory completed",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "goal reached (position)",
+      "pass": true,
+      "detail": "0.004 m < 0.30 m"
+    },
+    {
+      "name": "goal reached (heading)",
+      "pass": true,
+      "detail": "0.000 rad < 0.20 rad"
+    },
+    {
+      "name": "actual hull never touches an obstacle or wall",
+      "pass": true,
+      "detail": "min hull clearance 0.545 m"
+    },
+    {
+      "name": "actual collision circle never touches (verification radius r)",
+      "pass": true,
+      "detail": "min circle clearance 0.272 m (margin target 0.30 m)"
+    },
+    {
+      "name": "planned path circle clearance >= 0",
+      "pass": true,
+      "detail": "0.271 m"
+    },
+    {
+      "name": "tracking error < 0.30 m",
+      "pass": true,
+      "detail": "0.002 m"
+    }
+  ],
+  "actual": {
+    "start": [
+      1.2,
+      1.2,
+      0.0
+    ],
+    "end": [
+      20.003938765368176,
+      2.000251384510595,
+      -8.123197435996869e-10
+    ],
+    "displacement_m": 18.820959469966645,
+    "final_pos_err_m": 0.003946779294273685,
+    "final_yaw_err_rad": 8.123197435996869e-10,
+    "min_hull_clearance_m": 0.545171884753674,
+    "min_circle_clearance_m": 0.27170238627229093,
+    "max_tracking_err_m": 0.0018881621716521876
+  },
+  "trajectories_published": 1,
+  "planned": {
+    "pieces": 81,
+    "duration_s": 32.5823135702156,
+    "arc_length_m": 20.415445375097306,
+    "plan_latency_s": 0.06094717979431152,
+    "min_circle_clearance_m": 0.2713188423599805
+  },
+  "pass": true
+}

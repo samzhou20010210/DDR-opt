@@ -63,7 +63,7 @@ class HullSim {
     W_ = poolParam<double>("pool/width");
     hl_ = poolParam<double>("vessel/length") / 2.0;
     hw_ = poolParam<double>("vessel/width") / 2.0;
-    clearance_ = poolParam<double>("safety/wall_clearance");
+    clearance_ = poolParam<double>("safety/margin");
     v_fwd_ = poolParam<double>(m + "max_forward_speed");
     reverse_ = poolParam<bool>("vessel/reverse_enabled");
     v_rev_ = reverse_ ? poolParam<double>(m + "max_reverse_speed") : 0.0;

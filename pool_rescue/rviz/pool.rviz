@@ -25,6 +25,31 @@ Visualization Manager:
       Line Style: Billboards
       Line Width: 0.04
       Alpha: 1
+    - Class: rviz/Path
+      Name: Planned (MINCO)
+      Enabled: true
+      Topic: /visualizer/mincoPath
+      Color: 239; 41; 41
+      Line Style: Billboards
+      Line Width: 0.06
+      Alpha: 1
+    - Class: rviz/Path
+      Name: JPS path
+      Enabled: false
+      Topic: /global_planning/jps_path
+      Color: 255; 170; 0
+      Line Style: Lines
+      Line Width: 0.03
+      Alpha: 1
+    - Class: rviz/PointCloud2
+      Name: Planner occupancy
+      Enabled: false
+      Topic: /SDFmap/gridmap
+      Size (m): 0.1
+      Style: Flat Squares
+      Color Transformer: FlatColor
+      Color: 255; 255; 255
+      Alpha: 0.5
     - Class: rviz/MarkerArray
       Name: Hull
       Enabled: true

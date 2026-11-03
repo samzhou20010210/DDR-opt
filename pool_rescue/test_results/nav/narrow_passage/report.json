@@ -1,0 +1,86 @@
+{
+  "scenario": "narrow_passage",
+  "description": "barrier across the pool at x=12 with a 2.2 m gap (> 2(r+m) = 1.77 m)",
+  "expect": "success",
+  "goal": [
+    20.0,
+    6.25,
+    0.0
+  ],
+  "status_sequence": [
+    "GOAL_RECEIVED",
+    "TRAJECTORY_PUBLISHED",
+    "TRAJECTORY_COMPLETE"
+  ],
+  "collision_radius_m": 0.58309518948453,
+  "margin_m": 0.3,
+  "checks": [
+    {
+      "name": "trajectory published",
+      "pass": true,
+      "detail": "GOAL_RECEIVED -> TRAJECTORY_PUBLISHED -> TRAJECTORY_COMPLETE"
+    },
+    {
+      "name": "trajectory completed",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "goal reached (position)",
+      "pass": true,
+      "detail": "0.002 m < 0.30 m"
+    },
+    {
+      "name": "goal reached (heading)",
+      "pass": true,
+      "detail": "0.000 rad < 0.20 rad"
+    },
+    {
+      "name": "actual hull never touches an obstacle or wall",
+      "pass": true,
+      "detail": "min hull clearance 0.610 m"
+    },
+    {
+      "name": "actual collision circle never touches (verification radius r)",
+      "pass": true,
+      "detail": "min circle clearance 0.419 m (margin target 0.30 m)"
+    },
+    {
+      "name": "planned path circle clearance >= 0",
+      "pass": true,
+      "detail": "0.419 m"
+    },
+    {
+      "name": "tracking error < 0.30 m",
+      "pass": true,
+      "detail": "0.002 m"
+    }
+  ],
+  "actual": {
+    "start": [
+      1.2,
+      1.2,
+      0.0
+    ],
+    "end": [
+      19.999797184454604,
+      6.251677929777018,
+      -1.610405488551771e-09
+    ],
+    "displacement_m": 19.466684979287653,
+    "final_pos_err_m": 0.0016901427401429755,
+    "final_yaw_err_rad": 1.610405488551771e-09,
+    "min_hull_clearance_m": 0.6097070835681686,
+    "min_circle_clearance_m": 0.4193342079141755,
+    "max_tracking_err_m": 0.0019532831414017034
+  },
+  "trajectories_published": 1,
+  "planned": {
+    "pieces": 81,
+    "duration_s": 32.471648876189825,
+    "arc_length_m": 20.7883603907901,
+    "plan_latency_s": 0.046283721923828125,
+    "min_circle_clearance_m": 0.41917089958293774
+  },
+  "pass": true
+}

@@ -11,6 +11,7 @@
 #include "carstatemsgs/CarState.h"
 #include "carstatemsgs/Polynome.h"
 #include "std_msgs/Bool.h"
+#include "std_msgs/String.h"
 
 #include <thread>
 #include <nav_msgs/Odometry.h>
@@ -41,6 +42,9 @@ class PlanManager
     ros::Publisher cmd_pub_;
     ros::Publisher mpc_polynome_pub_;
     ros::Publisher emergency_stop_pub_;
+    // Latched planner outcome: GOAL_RECEIVED, GOAL_REJECTED_BUSY, TRAJECTORY_PUBLISHED, TRAJECTORY_COMPLETE,
+    // FAILED_NO_PATH, FAILED_TRAJECTORY_INFEASIBLE, EMERGENCY_STOP_COLLISION
+    ros::Publisher status_pub_;
 
     ros::Publisher record_pub_;
 
@@ -90,6 +94,8 @@ class PlanManager
       main_thread_timer_ = nh_.createTimer(ros::Duration(0.001),&PlanManager::MainThread, this);
       cmd_pub_ = nh_.advertise<carstatemsgs::CarState>("/simulation/PoseSub",1);
       emergency_stop_pub_ = nh_.advertise<std_msgs::Bool>("/planner/emergency_stop",1);
+      status_pub_ = nh_.advertise<std_msgs::String>("/planner/status", 10, true);
+      Traj_total_time_ = 0.0;
 
       record_pub_ = nh_.advertise<visualization_msgs::Marker>("/planner/calculator_time",1);
 
@@ -111,12 +117,33 @@ class PlanManager
       state_machine_ = StateMachine::IDLE;
 
       loop_start_time_ = ros::Time::now();
+      publishStatus("IDLE");
 
     }
 
     ~PlanManager(){ 
       sdfmap_->~SDFmap();
       visualizer_->~Visualizer();
+    }
+
+    void publishStatus(const std::string &status){
+      std_msgs::String msg;
+      msg.data = status;
+      status_pub_.publish(msg);
+    }
+
+    // Planning failed: publish no trajectory, drop the goal, return to IDLE so a new goal is accepted.
+    // If a previous trajectory is being executed (replan), stop the robot first.
+    void failPlanning(const std::string &status, const std::string &reason){
+      if(plan_start_time_ > 0){
+        std_msgs::Bool emergency_stop;
+        emergency_stop.data = true;
+        emergency_stop_pub_.publish(emergency_stop);
+      }
+      state_machine_ = StateMachine::IDLE;
+      have_goal_ = false;
+      publishStatus(status);
+      ROS_ERROR("PLANNING FAILED (%s): %s Goal dropped, no trajectory sent, waiting for a new goal.", status.c_str(), reason.c_str());
     }
 
     void printStateMachine(){
@@ -148,6 +175,7 @@ class PlanManager
       // Especially when there is no re-planning
       if(state_machine_ != StateMachine::IDLE){
         ROS_ERROR("Haven't reached the goal yet!!");
+        publishStatus("GOAL_REJECTED_BUSY");
         return;
       }
       ROS_INFO("\n\n\n\n\n\n\n\n");
@@ -159,6 +187,7 @@ class PlanManager
       have_goal_ = true;
       goal_state_<<msg->pose.position.x, msg->pose.position.y, tf::getYaw(msg->pose.orientation);
       if(if_fix_final_) goal_state_ = final_state_;
+      publishStatus("GOAL_RECEIVED");
       ROS_INFO_STREAM("goal state: " << goal_state_.transpose());
 
       ROS_INFO("---------------------------------------------------------------");
@@ -177,6 +206,7 @@ class PlanManager
           std_msgs::Bool emergency_stop;
           emergency_stop.data = true;
           emergency_stop_pub_.publish(emergency_stop);
+          if(state_machine_ != EMERGENCY_STOP) publishStatus("EMERGENCY_STOP_COLLISION");
           state_machine_ = EMERGENCY_STOP;
           ROS_INFO_STREAM("current_state_XYTheta_: " << current_state_XYTheta_.transpose());
           ROS_INFO_STREAM("Dis: " << sdfmap_->getDistanceReal(Eigen::Vector2d(current_state_XYTheta_.x(), current_state_XYTheta_.y())));
@@ -243,16 +273,7 @@ class PlanManager
         // front end
         ros::Time astar_start_time = ros::Time::now();
         if(!findJPSRoad()){
-          // No front-end path: drop the goal and return to IDLE so a new goal is accepted.
-          // If a previous trajectory is being executed (replan), stop the robot first.
-          if(plan_start_time_ > 0){
-            std_msgs::Bool emergency_stop;
-            emergency_stop.data = true;
-            emergency_stop_pub_.publish(emergency_stop);
-          }
-          state_machine_ = StateMachine::IDLE;
-          have_goal_ = false;
-          ROS_ERROR("Can not find JPS road to the goal! Goal dropped, waiting for a new goal.");
+          failPlanning("FAILED_NO_PATH", "front end (JPS) found no collision-free path to the goal.");
           return;
         }
         ROS_INFO("\033[41;37m all of front end time:%f \033[0m", (ros::Time::now()-astar_start_time).toSec());
@@ -260,6 +281,7 @@ class PlanManager
         // optimizer
         bool result = msplanner_->minco_plan(jps_planner_->flat_traj_);
         if(!result){
+          failPlanning("FAILED_TRAJECTORY_INFEASIBLE", "optimized trajectory failed the final collision check.");
           return;
         }
 
@@ -281,11 +303,13 @@ class PlanManager
         
 
         MPCPathPub(plan_start_time_);
+        publishStatus("TRAJECTORY_PUBLISHED");
 
         Traj_total_time_ = msplanner_->final_traj_.getTotalDuration();
       }
 
       if((ros::Time::now() - Traj_start_time_).toSec() >= Traj_total_time_){
+        if(state_machine_ != StateMachine::IDLE) publishStatus("TRAJECTORY_COMPLETE");
         state_machine_ = StateMachine::IDLE;
         have_goal_ = false;
       }

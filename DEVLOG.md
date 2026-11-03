@@ -189,6 +189,7 @@ accepted. If the failure happens during a replan (robot already moving), it firs
 | 2026-11-03 | Created this log: baseline analysis, interfaces, assumptions for the pool-rescue extension. No code changed. | `DEVLOG.md` |
 | 2026-11-03 | Headless workflow: `gui` (default true) and `map_seed` (default −1) args in `planner_sim.launch` — defaults keep stock behaviour; headless runner + automated goal/trajectory/control/motion check; baseline results recorded. | `plan_manager/launch/planner_sim.launch`, `scripts/run_headless_sim.sh`, `scripts/smoke_test.py`, `DEVLOG.md` |
 | 2026-11-03 | New package `pool_rescue`: central annotated config (49 params, value/unit/source), generator → per-node DDR-opt params for `approach`/`rescue`, messages (Person, PersonArray, ExtractionZone, RescueTask), C++ `ddr_adapter` (Twist/Odometry interfaces, latency, single `world→base_link` TF), `pool_sim.launch`, offline + live validator. Stock example untouched. See §5. | `pool_rescue/**`, `DEVLOG.md` |
+| 2026-11-03 | Stage 3, DDR-opt navigation on the hull: `pool_nav.launch` (hull_sim + planner + MPC + map + laser + `nav_bridge`; legacy simulator and EKF off), circle collision model with one clearance derivation, `/planner/status` + explicit failure handling in `plan_manager.hpp`, lane ropes (visual only), `scenarios.yaml` + generated scenario maps, `nav_tests.py`, `run_nav_scenarios.sh`, live check `--stack nav`; `safety.wall_clearance` renamed `safety.margin`. See §7. | `plan_manager/include/plan_manager/plan_manager.hpp`, `pool_rescue/**`, `DEVLOG.md` |
 | 2026-11-03 | Stage 2, pool environment + hull simulator: `pool_env` (boundary + RViz markers from config), C++ `hull_sim` (latency, asymmetric accel/decel, yaw accel, reverse switch, cmd timeout, wall contact, standby validity check, odom/TF/trajectory/hull markers, reset service), `pool_hull_sim.launch`, `rviz/pool.rviz`, `hull_tests.py`; 5 new central params; the generator gives the planner `min_vel = 0` when reverse is disabled. See §6. | `pool_rescue/**`, `DEVLOG.md` |
 | 2026-11-03 | Fix planner segfault when JPS finds no path: `findJPSRoad()` returns false; `MainThread` drops the goal → `IDLE` (emergency stop first if replanning). Verified: seeds 1/3 no crash + recovery to a new goal; seeds 2/4 PASS, seed 2 plan identical. | `plan_manager/include/plan_manager/plan_manager.hpp`, `DEVLOG.md` |
 
@@ -313,7 +314,59 @@ A screenshot check was abandoned, because without a compositor `xwd` also captur
 
 ---
 
-## 7. Open questions
+## 7. Stage 3: DDR-opt single-goal navigation on the pool hull
+
+`roslaunch pool_rescue pool_nav.launch scenario:=<name>` and `pool_rescue/scripts/run_nav_scenarios.sh`. Design
+details are in `pool_rescue/README.md` (section "Navigation").
+
+- **Reused unchanged:** JPS front end, MINCO back end, MPC, SDF map, laser simulator.
+- **Disabled:** the legacy `simulator` and `icrekf`. The planner and MPC take `hull_sim` ground truth on
+  `/pool/robot/odom`.
+- **Adaptation layer:** `nav_bridge` converts the MPC's CarState command to `/pool/cmd_vel` (Twist), and
+  `hull_sim`'s odometry to the CarState sensor pose the laser simulator expects.
+- **Lane ropes:** 4 ropes at y = 2.5 / 5 / 7.5 / 10 m (5 × 2.5 m lanes, World Aquatics lane width, 0.10 m floats).
+  They appear in RViz and the plots only, never in the planner map.
+
+**Collision model (circle).**
+- r = 0.583 m (derived), m = 0.30 m.
+- Planning (JPS and optimizer) uses r + m = 0.883 m; final verification uses r.
+- The map is not inflated.
+- The earlier 8-point footprint with `finalMinSafeDis = width/2` was dropped. The legacy final check only looks at
+  the centre, so width/2 missed the hull's ends: exactly the "omission" the circle model avoids.
+
+**DDR-opt code change (`plan_manager.hpp`).**
+- A latched `/planner/status` topic.
+- A `failPlanning()` helper used for both JPS and optimizer failures.
+- Before, an optimizer failure just returned. The planner stayed in PLANNING and only reached idle again through a
+  comparison with the uninitialized `Traj_total_time_` (now initialized). No trajectory was published even then,
+  but nothing reported the failure.
+
+**Recorded results** (2026-11-03, approach mode, headless; data in `pool_rescue/test_results/nav/<scenario>/`). The
+live check passed 58/58 in every run.
+
+| Scenario | Expect | Status sequence | Plan | Actual |
+|---|---|---|---|---|
+| obstacle_straight | success | GOAL_RECEIVED → TRAJECTORY_PUBLISHED → TRAJECTORY_COMPLETE | 20.42 m, 32.6 s, computed in 0.061 s | end error 4 mm / 0.000 rad; min hull clearance 0.545 m; min circle clearance 0.272 m (planned 0.271); tracking ≤ 2 mm |
+| near_wall | success | same | 22.60 m, 34.1 s, 0.034 s | 1 mm; hull 0.700 m; circle 0.517 m; tracking ≤ 2 mm |
+| near_wall_too_close | failure | GOAL_RECEIVED → FAILED_NO_PATH | none published | displacement 0, 0 non-zero commands |
+| narrow_passage (2.2 m gap) | success | GOAL_RECEIVED → TRAJECTORY_PUBLISHED → TRAJECTORY_COMPLETE | 20.79 m, 32.5 s, 0.046 s | 2 mm; hull 0.610 m; circle 0.419 m; tracking ≤ 2 mm |
+| narrow_too_tight (1.4 m gap) | failure | GOAL_RECEIVED → FAILED_NO_PATH | none | displacement 0, 0 commands. Refused by design: the circle needs 1.77 m |
+| blocked | failure | GOAL_RECEIVED → FAILED_NO_PATH | none | displacement 0, 0 commands |
+
+Notes:
+- The circle clearance in `obstacle_straight` (0.272 m) is slightly below the 0.30 m margin. The margin is a soft
+  penalty in the optimizer, and obstacle cells are quantized to 0.1 m. The hard verification limit (≥ 0) holds.
+- **Not exercised:** all three failures were caught by JPS, so the `FAILED_TRAJECTORY_INFEASIBLE` branch (optimizer
+  output rejected by the final check) has no scenario yet. The failure during a replan (robot moving) is also
+  untested, because replanning is off (`replan_period` 5000 s).
+- **Obstacles in `hull_sim`:** the hull simulator still only knows the pool walls. Actual contact with obstacles is
+  evaluated after the run, geometrically, by `nav_tests.py`.
+- **Regressions:** all pass after this stage: hull tests, `pool_sim.launch` (live check 61/61 + drive), and the
+  stock `planner_sim` headless test.
+
+---
+
+## 8. Open questions
 
 - Full mission spec beyond "start from a standby position near a corner": victim detection, pickup behaviour,
   return-to-base, time limits?

@@ -27,6 +27,11 @@ pool:
   width:      {value: 12.5, unit: m, source: "assumption: 5 lanes x 2.5 m (World Aquatics lane width)"}
   wall_thickness_in_map: {value: 0.2, unit: m, source: "assumption: wall box centred on the edge -> 1 occupied 0.1 m cell inside the pool, same as stock boundary walls"}
   map_resolution: {value: 0.1, unit: m, source: "stock: planner_sim.launch gridmap_interval_"}
+  lanes:            # lane ropes run the full pool length (x); visual only — NOT obstacles (the vessel passes over them)
+    count:        {value: 5,    unit: "-", source: "assumption: 5 lanes fill the 12.5 m width exactly"}
+    lane_width:   {value: 2.5,  unit: m,   source: "standard: World Aquatics lane width 2.5 m"}
+    outer_space:  {value: 0.0,  unit: m,   source: "assumption: no extra space outside lanes 1 and 5 in this 12.5 m pool (World Aquatics competition pools add 0.2 m)"}
+    rope_diameter: {value: 0.10, unit: m,  source: "standard: World Aquatics lane rope floats 0.05-0.15 m diameter"}
 
 standby:            # start pose near the (0,0) corner
   x:   {value: 1.2, unit: m,   source: "assumption: vessel half-diagonal 0.58 m + wall clearance 0.3 m + 0.3 m slack"}
@@ -49,8 +54,15 @@ control:
   replan_period: {value: 5000.0, unit: s, source: "stock: planner_sim.launch replan_time (5000 = no periodic replanning)"}
   max_replan_time: {value: 0.05, unit: s, source: "stock: planner_sim.launch max_replan_time"}
 
+# Collision model (single definition, applied by scripts/gen_ddr_params.py — nothing else may add inflation):
+#   collision radius  r = hypot(vessel.length/2, vessel.width/2)   (DERIVED, circle enclosing the hull; not configured)
+#   safety margin     m = safety.margin
+#   planning clearance  r + m : JPS cell blocking (jps_safe_dis) and optimizer penalty (safeDis, checkpoint at centre)
+#   verification        r     : finalMinSafeDis — a trajectory whose centre comes closer than r to an obstacle is
+#                                rejected (the hull circle would touch it); the margin is the soft buffer on top.
+#   map inflation       none  : the planner's grid/ESDF hold true obstacle geometry; all clearance comes from above.
 safety:
-  wall_clearance:   {value: 0.30, unit: m, source: "stock: back_end global_planning3ms.yaml safeDis"}
+  margin:           {value: 0.30, unit: m, source: "stock: back_end global_planning3ms.yaml safeDis; applies to walls and obstacles"}
   person_clearance: {value: 0.50, unit: m, source: "assumption: keep 0.5 m from non-target swimmers' footprints (not yet consumed: persons are not in the planner map)"}
 
 sensing:

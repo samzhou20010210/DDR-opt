@@ -1,0 +1,68 @@
+<launch>
+  <!-- Pool navigation: DDR-opt front end (JPS) + back end (MINCO) + MPC driving the pool hull simulator.
+       The legacy DDR-opt `simulator` and the ICR-EKF are NOT started: planner and MPC use hull_sim's
+       ground-truth /pool/robot/odom. Static obstacles come from config/scenarios.yaml (scenario arg).
+       Goal: rviz "2D Nav Goal" or /move_base_simple/goal. Outcome: /planner/status (latched String). -->
+
+  <arg name="mode" default="approach"/>        <!-- approach | rescue -->
+  <arg name="scenario" default="empty"/>       <!-- key of config/scenarios.yaml -->
+  <arg name="gui" default="true"/>
+  <arg name="check" default="true"/>           <!-- live parameter / TF / interface check at startup -->
+
+  <arg name="gen" value="$(find pool_rescue)/config/generated/$(arg mode)"/>
+  <arg name="odom_topic" value="/pool/robot/odom"/>
+  <arg name="traj_topic" value="/planner/traj_poly"/>
+
+  <rosparam file="$(find pool_rescue)/config/pool_rescue.yaml" command="load" ns="pool"/>
+  <rosparam file="$(find pool_rescue)/config/scenarios.yaml" command="load" ns="pool"/>
+  <param name="/pool/mode" value="$(arg mode)"/>
+  <param name="/pool/scenario" value="$(arg scenario)"/>
+
+  <!-- vessel + environment (single publisher of /pool/robot/odom and world -> base_link) -->
+  <node name="pool_env" pkg="pool_rescue" type="pool_env.py" output="screen"/>
+  <node name="hull_sim" pkg="pool_rescue" type="hull_sim" output="screen" required="true"/>
+
+  <!-- DDR-opt planner (front end + back end), unchanged apart from /planner/status -->
+  <node name="global_planning" pkg="plan_manager" type="global_planning" output="screen">
+    <rosparam file="$(find front_end)/config/jps3ms.yaml" command="load"/>
+    <rosparam file="$(find back_end)/config/global_planning3ms.yaml" command="load"/>
+    <rosparam file="$(find plan_env)/config/mapsim.yaml" command="load"/>
+    <rosparam file="$(arg gen)/global_planning.yaml" command="load"/>
+    <remap from="~local_pointcloud" to="/laser_simulator/local_pointcloud"/>
+    <remap from="~odom" to="$(arg odom_topic)"/>
+    <remap from="~traj" to="$(arg traj_topic)"/>
+  </node>
+
+  <!-- MUST be named "mpc": mpc_controller reads only the absolute namespace /mpc/... -->
+  <node name="mpc" pkg="mpc_controller" type="mpc" output="screen">
+    <rosparam file="$(find mpc_controller)/config/mpc3ms.yaml" command="load"/>
+    <rosparam file="$(arg gen)/mpc.yaml" command="load"/>
+    <remap from="~cmd" to="/pool/internal/mpc_cmd"/>
+    <remap from="~odom" to="$(arg odom_topic)"/>
+    <remap from="~traj" to="$(arg traj_topic)"/>
+  </node>
+
+  <!-- static map (walls + scenario obstacles; lane ropes are not obstacles) and simulated sensing -->
+  <node name="global_map_node" pkg="simulator" type="global_map_node" output="screen">
+    <rosparam file="$(arg gen)/global_map_node.yaml" command="load"/>
+    <rosparam file="$(find pool_rescue)/config/generated/scenarios/$(arg scenario).yaml" command="load"/>
+  </node>
+  <node name="laser_simulator" pkg="laser_simulator" type="laser_sim_node" output="screen">
+    <rosparam file="$(find laser_simulator)/config/perspective_laser.yaml" command="load"/>
+    <rosparam file="$(arg gen)/laser_simulator.yaml" command="load"/>
+    <remap from="/simulation/PosePub" to="/pool/internal/sensor_pose"/>   <!-- sensor rides on hull_sim's pose -->
+  </node>
+
+  <!-- adaptation layer -->
+  <node name="nav_bridge" pkg="pool_rescue" type="nav_bridge" output="screen">
+    <remap from="mpc_cmd" to="/pool/internal/mpc_cmd"/>
+    <remap from="cmd_vel" to="/pool/cmd_vel"/>
+    <remap from="odom" to="$(arg odom_topic)"/>
+    <remap from="sensor_pose" to="/pool/internal/sensor_pose"/>
+  </node>
+
+  <node if="$(arg check)" name="param_check" pkg="pool_rescue" type="check_params.py" output="screen"
+        args="--live --stack nav --mode $(arg mode) --scenario $(arg scenario)"/>
+
+  <node if="$(arg gui)" name="rviz" pkg="rviz" type="rviz" args="-d $(find pool_rescue)/rviz/pool.rviz" output="log"/>
+</launch>

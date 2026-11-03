@@ -37,10 +37,14 @@ add_executable(ddr_adapter src/ddr_adapter.cpp)
 add_dependencies(ddr_adapter ${catkin_EXPORTED_TARGETS} ${${PROJECT_NAME}_EXPORTED_TARGETS})
 target_link_libraries(ddr_adapter ${catkin_LIBRARIES})
 
+add_executable(nav_bridge src/nav_bridge.cpp)
+add_dependencies(nav_bridge ${catkin_EXPORTED_TARGETS})
+target_link_libraries(nav_bridge ${catkin_LIBRARIES})
+
 add_executable(hull_sim src/hull_sim.cpp)
 add_dependencies(hull_sim ${catkin_EXPORTED_TARGETS})
 target_link_libraries(hull_sim ${catkin_LIBRARIES})
 
 catkin_install_python(PROGRAMS scripts/gen_ddr_params.py scripts/check_params.py scripts/pool_env.py
-  scripts/hull_tests.py
+  scripts/hull_tests.py scripts/nav_tests.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
