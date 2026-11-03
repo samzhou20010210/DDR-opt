@@ -126,7 +126,16 @@ Decision vector: 2(N−1) inner (θ,s) points, final s (free), N virtual times (
 
 ---
 
-## 3. Execution (baseline)
+## 3. Execution
+
+### 3.1 Verified environment (2026-11-03)
+
+Ubuntu 20.04.6, ROS Noetic, catkin_tools 0.9.4 (devel layout `linked`, no extra CMake args), Python 3 + rospy,
+OSQP + OSQP-Eigen 0.8.1 in `/usr/local`, `ros-noetic-tf2-sensor-msgs`, `pcl_ros`. **plotjuggler is NOT installed**
+(the stock launch files start it unconditionally, so that node fails to start in GUI runs — harmless). No Xvfb.
+A clean build from scratch (fresh workspace) takes ~70 s at `-j8`: 10/10 packages, 16 benign compiler warnings.
+
+### 3.2 Interactive (GUI)
 
 ```bash
 cd ~/main/pr_robot/DDRopt_ws
@@ -137,6 +146,37 @@ roslaunch plan_manager planner_nmpc.launch     # wheel speeds + ACADO NMPC (ICR 
 # set goal with rviz "2D Nav Goal"
 ```
 
+### 3.3 Headless end-to-end check
+
+```bash
+src/DDR-opt-main/scripts/run_headless_sim.sh                 # build + run + verify, seed 2, goal (3.7, 0.3, 3.14)
+src/DDR-opt-main/scripts/run_headless_sim.sh --no-build --seed 4 --goal 0 5 1.57 --out /tmp/myrun
+```
+
+- Launches `planner_sim.launch gui:=false map_seed:=N` on a private master (port 11411, `DISPLAY` unset), waits for
+  EKF odom + 3 s map build, publishes one goal, records until the trajectory ends + 2 s.
+- `scripts/smoke_test.py` writes `report.json`, `truth.csv` (ground-truth x, y, yaw, v, ω), `cmd.csv` (MPC v, ω),
+  `planned_path.csv` (from `/visualizer/mincoPath`), plus `launch.log` and ROS logs into the out dir. Exit 0 = PASS.
+- PASS needs: trajectory published, no emergency stop, robot moved, final position error < 0.3 m, stopped,
+  commands within ±3 m/s / ±3 rad/s, max cross-track error to the planned path < 0.3 m.
+- A one-off GUI launch with a fixed map: `roslaunch plan_manager planner_sim.launch map_seed:=2`.
+
+### 3.4 Baseline results (`planner_sim.launch`, goal (3.7, 0.3, 3.14))
+
+| Seed | Result | Notes |
+|---|---|---|
+| 1 | FAIL | JPS: no path to goal (random boxes only keep clear of the start) → **`global_planning` segfaults** |
+| 2 | PASS | 19 pieces, 7.62 s, 11.58 m; plan 24 ms (JPS 0.4 ms, pre-process 10 ms); min clearance 0.31 m; cmd v ∈ [−0.30, 2.78], ω ∈ [−0.88, 2.57]; final err 1.6 cm / 0.003 rad; max tracking err 2.6 cm |
+| 3 | FAIL | same as seed 1 |
+| 4 | PASS | |
+
+Repeat runs of seed 2 give bit-identical plans; final pose varies by ~1 cm because the simulator adds velocity
+noise (`if_add_noise: true`).
+
+**Known bug (not fixed):** `PlanManager::findJPSRoad()` ignores the return value of `JPSPlanner::plan()`; when no
+path exists it continues on an empty path and the node crashes (`exit code -11`). Needs a guard before the
+pool-rescue mission logic relies on replanning.
+
 ---
 
 ## 4. Change log
@@ -144,6 +184,7 @@ roslaunch plan_manager planner_nmpc.launch     # wheel speeds + ACADO NMPC (ICR 
 | Date | Change | Files |
 |---|---|---|
 | 2026-11-03 | Created this log: baseline analysis, interfaces, assumptions for the pool-rescue extension. No code changed. | `DEVLOG.md` |
+| 2026-11-03 | Headless workflow: `gui` (default true) and `map_seed` (default −1) args in `planner_sim.launch` — defaults keep stock behaviour; headless runner + automated goal/trajectory/control/motion check; baseline results recorded. | `plan_manager/launch/planner_sim.launch`, `scripts/run_headless_sim.sh`, `scripts/smoke_test.py`, `DEVLOG.md` |
 
 ---
 
