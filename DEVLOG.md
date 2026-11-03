@@ -165,17 +165,20 @@ src/DDR-opt-main/scripts/run_headless_sim.sh --no-build --seed 4 --goal 0 5 1.57
 
 | Seed | Result | Notes |
 |---|---|---|
-| 1 | FAIL | JPS: no path to goal (random boxes only keep clear of the start) → **`global_planning` segfaults** |
+| 1 | FAIL (expected) | JPS: no path to goal (random boxes only keep clear of the start). Before the fix: **`global_planning` segfaulted**. After: goal dropped, node stays up; a follow-up goal (−5, −0.5, 0) in the same session PASSes |
 | 2 | PASS | 19 pieces, 7.62 s, 11.58 m; plan 24 ms (JPS 0.4 ms, pre-process 10 ms); min clearance 0.31 m; cmd v ∈ [−0.30, 2.78], ω ∈ [−0.88, 2.57]; final err 1.6 cm / 0.003 rad; max tracking err 2.6 cm |
-| 3 | FAIL | same as seed 1 |
+| 3 | FAIL (expected) | same as seed 1 |
 | 4 | PASS | |
 
 Repeat runs of seed 2 give bit-identical plans; final pose varies by ~1 cm because the simulator adds velocity
 noise (`if_add_noise: true`).
 
-**Known bug (not fixed):** `PlanManager::findJPSRoad()` ignores the return value of `JPSPlanner::plan()`; when no
-path exists it continues on an empty path and the node crashes (`exit code -11`). Needs a guard before the
-pool-rescue mission logic relies on replanning.
+**Fixed — JPS failure crash:** `PlanManager::findJPSRoad()` ignored the return value of `JPSPlanner::plan()`; with
+no path it continued on an empty path and the node segfaulted (`exit code -11`). Now it returns `false`, and
+`MainThread` drops the goal and goes back to `IDLE` (instead of the dead-end `EMERGENCY_STOP`), so the next goal is
+accepted. If the failure happens during a replan (robot already moving), it first publishes
+`/planner/emergency_stop`; the MPC zeroes its command and resumes on the next trajectory. That replan branch is
+**not exercised** by the headless test (`planner_sim.launch` uses `replan_time: 5000`, so it never replans).
 
 ---
 
@@ -185,6 +188,7 @@ pool-rescue mission logic relies on replanning.
 |---|---|---|
 | 2026-11-03 | Created this log: baseline analysis, interfaces, assumptions for the pool-rescue extension. No code changed. | `DEVLOG.md` |
 | 2026-11-03 | Headless workflow: `gui` (default true) and `map_seed` (default −1) args in `planner_sim.launch` — defaults keep stock behaviour; headless runner + automated goal/trajectory/control/motion check; baseline results recorded. | `plan_manager/launch/planner_sim.launch`, `scripts/run_headless_sim.sh`, `scripts/smoke_test.py`, `DEVLOG.md` |
+| 2026-11-03 | Fix planner segfault when JPS finds no path: `findJPSRoad()` returns false; `MainThread` drops the goal → `IDLE` (emergency stop first if replanning). Verified: seeds 1/3 no crash + recovery to a new goal; seeds 2/4 PASS, seed 2 plan identical. | `plan_manager/include/plan_manager/plan_manager.hpp`, `DEVLOG.md` |
 
 ---
 

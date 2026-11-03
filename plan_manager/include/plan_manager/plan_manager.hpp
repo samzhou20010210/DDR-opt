@@ -243,8 +243,16 @@ class PlanManager
         // front end
         ros::Time astar_start_time = ros::Time::now();
         if(!findJPSRoad()){
-          state_machine_ = EMERGENCY_STOP;
-          ROS_ERROR("EMERGENCY_STOP!!! can not find astar road !!!");
+          // No front-end path: drop the goal and return to IDLE so a new goal is accepted.
+          // If a previous trajectory is being executed (replan), stop the robot first.
+          if(plan_start_time_ > 0){
+            std_msgs::Bool emergency_stop;
+            emergency_stop.data = true;
+            emergency_stop_pub_.publish(emergency_stop);
+          }
+          state_machine_ = StateMachine::IDLE;
+          have_goal_ = false;
+          ROS_ERROR("Can not find JPS road to the goal! Goal dropped, waiting for a new goal.");
           return;
         }
         ROS_INFO("\033[41;37m all of front end time:%f \033[0m", (ros::Time::now()-astar_start_time).toSec());
@@ -319,8 +327,10 @@ class PlanManager
         start_state = plan_start_state_XYTheta;
       }
 
-      jps_planner_->plan(start_state, goal_state_);
-      
+      if(!jps_planner_->plan(start_state, goal_state_)){
+        return false;
+      }
+
       jps_planner_->getKinoNodeWithStartPath(start_path, if_forward, plan_start_state_VAJ, plan_start_state_OAJ);
 
 
