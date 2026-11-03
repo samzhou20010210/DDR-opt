@@ -188,15 +188,68 @@ accepted. If the failure happens during a replan (robot already moving), it firs
 |---|---|---|
 | 2026-11-03 | Created this log: baseline analysis, interfaces, assumptions for the pool-rescue extension. No code changed. | `DEVLOG.md` |
 | 2026-11-03 | Headless workflow: `gui` (default true) and `map_seed` (default −1) args in `planner_sim.launch` — defaults keep stock behaviour; headless runner + automated goal/trajectory/control/motion check; baseline results recorded. | `plan_manager/launch/planner_sim.launch`, `scripts/run_headless_sim.sh`, `scripts/smoke_test.py`, `DEVLOG.md` |
+| 2026-11-03 | New package `pool_rescue`: central annotated config (49 params, value/unit/source), generator → per-node DDR-opt params for `approach`/`rescue`, messages (Person, PersonArray, ExtractionZone, RescueTask), C++ `ddr_adapter` (Twist/Odometry interfaces, latency, single `world→base_link` TF), `pool_sim.launch`, offline + live validator. Stock example untouched. See §5. | `pool_rescue/**`, `DEVLOG.md` |
 | 2026-11-03 | Fix planner segfault when JPS finds no path: `findJPSRoad()` returns false; `MainThread` drops the goal → `IDLE` (emergency stop first if replanning). Verified: seeds 1/3 no crash + recovery to a new goal; seeds 2/4 PASS, seed 2 plan identical. | `plan_manager/include/plan_manager/plan_manager.hpp`, `DEVLOG.md` |
 
 ---
 
-## 5. Open questions
+## 5. Pool rescue configuration and interfaces (`pool_rescue/`)
 
-- Full mission spec (text cut off after "starting from a standby position near a corne…"): victim detection, pickup
-  behaviour, return-to-base, time limits?
-- Pool geometry (dimensions, shape, lane ropes/ladders as obstacles).
-- Robot parameters: hull size, mass, thruster max thrust, track width between thrusters, drag coefficients.
+Full interface spec: `pool_rescue/README.md`. Summary:
+
+- **Single source of parameters:** `pool_rescue/config/pool_rescue.yaml`, where every value has a unit and a source
+  (stock / standard / assumption). `scripts/gen_ddr_params.py` generates
+  `config/generated/{approach,rescue}/<node>.yaml`. `pool_sim.launch mode:=approach|rescue` loads, for each legacy
+  node, the stock yaml first and then the generated file.
+- **Interfaces:** `/pool/robot/odom` (Odometry, estimate), `/pool/robot/odom_truth`, `/pool/cmd_vel` (Twist),
+  `/pool/persons` (PersonArray), `/pool/rescue_task` (RescueTask). Frames: `world` (pool corner), `base_link`.
+  TF owners: `world→base_link` = `ddr_adapter`, `world→laser` = `laser_simulator`.
+- **Initial assumptions** (all marked `assumption:` in the yaml, to be confirmed):
+  - pool 25 × 12.5 m
+  - vessel 1.0 × 0.6 m
+  - approach mode: 1.0 / −0.3 m/s, accel 0.5 / decel 0.4 m/s², 0.8 rad/s
+  - rescue mode: about half of every approach limit
+  - control latency 0.1 s
+  - wall clearance 0.3 m
+
+Legacy issues found while doing this, all handled without changing legacy code:
+1. **Boundary walls are wrong on non-square maps.** `global_map_node` swaps the x and y extents of its automatic
+   walls, which would leave a 12.5 m gap in each long wall of a 25 × 12.5 m pool. Also, the launch files set
+   `if_boundary_wall`, but the code reads `if_boundary_wall_`. The pool config therefore sets
+   `if_boundary_wall_: false` and generates the four walls as explicit `map_box` entries.
+2. **`mpc_controller` silently uses −1 for missing `/mpc/<key>` params.** The node must be named `mpc`, and the live
+   check verifies every key it reads.
+3. **The simulator's command subscriber is UDP-only** (`TransportHints().unreliable()`), so rospy publishers can't
+   reach it. That's why the adapter is written in C++.
+4. **No `base_link` frame existed.** The only TF in the stock stack was `world→laser` from the laser simulator.
+
+Validation (2026-11-03, headless, private master):
+- `check_params.py`: offline 26/26 checks, live 52/52 checks in both modes. The live run covers:
+  - generated values on every node
+  - all 16 `/mpc/*` keys
+  - `/pool/*` loaded
+  - one publisher per TF frame
+  - interface topic types and publishers
+- Negative tests:
+  - tampering with a generated file → offline FAIL
+  - running the rescue-mode check against an approach-mode stack → 4 FAILs
+- Drive from standby (1.2, 1.2) to (20, 8, 0) through the adapter with 0.1 s latency:
+
+| Mode | Plan | v max | \|ω\| max | Final error | Max tracking error |
+|---|---|---|---|---|---|
+| approach | 30.8 s | 0.80 m/s | 0.52 rad/s | 1 mm | 3 mm |
+| rescue | 58.6 s | 0.42 m/s | 0.40 rad/s | 3 mm | 2 mm |
+
+Not done yet: nothing publishes persons or tasks; persons are not obstacles in the planner map (`person_clearance`
+is defined but not used); mode switching requires a relaunch; the dynamics are still kinematic.
+
+---
+
+## 6. Open questions
+
+- Full mission spec beyond "start from a standby position near a corner": victim detection, pickup behaviour,
+  return-to-base, time limits?
+- Confirm or replace every `assumption:` in `pool_rescue/config/pool_rescue.yaml`, especially pool size, hull size,
+  thruster limits and latency.
 - Fidelity of water dynamics wanted (kinematic + ICR approximation vs. a 3-DOF Fossen-style surge/sway/yaw model).
-- Controller: v/ω MPC or thruster-level NMPC.
+- Should persons become planner obstacles (`person_clearance`) and should mode switching happen at runtime?

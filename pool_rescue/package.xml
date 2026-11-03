@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>pool_rescue</name>
+  <version>0.1.0</version>
+  <description>Pool rescue robot simulation on top of DDR-opt: central parameters, interface messages, DDR-opt adapter, pool launch.</description>
+  <maintainer email="samzhou20010210@gmail.com">sam</maintainer>
+  <license>GPLv3</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+  <build_depend>message_generation</build_depend>
+  <exec_depend>message_runtime</exec_depend>
+
+  <depend>roscpp</depend>
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>tf</depend>
+  <depend>tf2_ros</depend>
+  <depend>tf2_msgs</depend>
+  <depend>carstatemsgs</depend>
+
+  <exec_depend>plan_manager</exec_depend>
+  <exec_depend>simulator</exec_depend>
+  <exec_depend>mpc_controller</exec_depend>
+  <exec_depend>icrekf</exec_depend>
+  <exec_depend>laser_simulator</exec_depend>
+  <exec_depend>plan_env</exec_depend>
+  <exec_depend>front_end</exec_depend>
+  <exec_depend>back_end</exec_depend>
+</package>
