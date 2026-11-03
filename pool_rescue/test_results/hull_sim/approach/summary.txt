@@ -1,0 +1,37 @@
+== straight: PASS
+  [PASS] response latency                              measured 0.1014       expected 0.1000 +/- 0.0300 s
+  [PASS] acceleration                                  measured 0.5000       expected 0.5000 +/- 0.0150 m/s^2
+  [PASS] steady speed (clamped from 1.50)              measured 1.0000       expected 1.0000 +/- 0.0000 m/s
+  [PASS] max lateral deviation                         measured 0.0000       expected <= 1e-06 m
+  [PASS] max heading drift                             measured 0.0000       expected <= 1e-09 rad
+== stop: PASS
+  [PASS] speed before stop command                     measured 1.0000       expected 1.0000 +/- 0.0000 m/s
+  [PASS] response latency                              measured 0.1069       expected 0.1000 +/- 0.0300 s
+  [PASS] deceleration                                  measured 0.4000       expected 0.4000 +/- 0.0120 m/s^2
+  [PASS] stopping time (latency + v/dec)               measured 2.5970       expected 2.6000 +/- 0.0300 s
+  [PASS] stopping distance (v*latency + v^2/2dec)      measured 1.3499       expected 1.3500 +/- 0.0400 m
+  [PASS] creep after stop                              measured 0.0000       expected <= 0.0 m/s
+== turn_in_place: PASS
+  [PASS] response latency                              measured 0.1077       expected 0.1000 +/- 0.0300 s
+  [PASS] yaw acceleration                              measured 1.0000       expected 1.0000 +/- 0.0300 rad/s^2
+  [PASS] steady yaw rate                               measured 0.8000       expected 0.8000 +/- 0.0000 rad/s
+  [PASS] yaw deceleration                              measured 1.0000       expected 1.0000 +/- 0.0300 rad/s^2
+  [PASS] position drift (turning in place)             measured 0.0000       expected <= 1e-06 m
+  [PASS] turns counter-clockwise for omega > 0         measured 2.3201       expected >= 0.0 rad
+== arc_turn: PASS
+  [PASS] steady turn radius (v/omega)                  measured 1.2500       expected 1.2500 +/- 0.0125 m
+== reverse: PASS
+  [PASS] reverse speed reached                         measured -0.3000      expected -0.3000 +/- 0.0000 m/s
+  [PASS] response latency                              measured 0.1047       expected 0.1000 +/- 0.0300 s
+  [PASS] reverse acceleration                          measured 0.5000       expected 0.5000 +/- 0.0150 m/s^2
+  [PASS] moved backwards (x decreased)                 measured -0.6825      expected <= -0.1 m
+== wall_contact: PASS
+  [PASS] hull never outside the pool                   measured 0.0009       expected >= 0.0 m
+  [PASS] wall_contact reported                         measured 1.0000       expected >= 1.0 -
+  [PASS] no motion while the same command pushes into the wall measured 0.0000       expected <= 0.0 m/s + rad/s
+  [PASS] recovers by reversing away                    measured 0.5100       expected >= 0.05 m
+  [PASS] contact cleared after recovery                measured 1.0000       expected >= 1.0 -
+== cmd_timeout: PASS
+  [PASS] decel starts after latency + timeout          measured 0.5815       expected 0.6000 +/- 0.0500 s
+  [PASS] stopped                                       measured 0.0000       expected 0.0000 +/- 0.0000 m/s
+RESULT: PASS | artifacts: approach

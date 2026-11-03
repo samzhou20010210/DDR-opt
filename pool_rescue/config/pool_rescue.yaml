@@ -39,11 +39,13 @@ vessel:
   height:   {value: 0.3, unit: m, source: "assumption: visualization only (simulator marker height)"}
   thruster_separation: {value: 0.5, unit: m, source: "assumption: beam minus 0.1 m; sets ICR_yl/yr = +-0.25 m for the standard diff-drive model"}
   couple_speed_and_turn_limits: {value: true, unit: "-", source: "stock: car3ms.yaml if_directly_constrain_v_omega=false (v and omega share the thrust budget, like wheel-speed limits)"}
+  reverse_enabled: {value: true, unit: "-", source: "assumption: thrusters can run in reverse; false -> hull_sim clamps v >= 0 and the planner gets min_vel = 0"}
 
 control:
   latency:  {value: 0.10, unit: s,  source: "assumption: ESC + serial/radio command path on small USVs (50-150 ms)"}
   mpc_dt:   {value: 0.01, unit: s,  source: "stock: mpc_controller/config/mpc3ms.yaml dt"}
   rate:     {value: 100.0, unit: Hz, source: "stock: mpc3ms.yaml cmd_timer_rate"}
+  cmd_timeout: {value: 0.5, unit: s, source: "assumption: hull_sim targets zero velocity if no command arrives for this long (lost-link safety)"}
   replan_period: {value: 5000.0, unit: s, source: "stock: planner_sim.launch replan_time (5000 = no periodic replanning)"}
   max_replan_time: {value: 0.05, unit: s, source: "stock: planner_sim.launch max_replan_time"}
 
@@ -58,6 +60,9 @@ sensing:
 simulation:
   add_noise:        {value: true, unit: "-", source: "stock: planner_sim.launch if_add_noise"}
   noise_stddev:     {value: 0.01, unit: "-", source: "stock: planner_sim.launch noise_stddev (relative to v, omega)"}
+  hull_sim_rate:    {value: 100.0, unit: Hz, source: "assumption: matches the 100 Hz control rate; hull_sim integration and odom publish rate"}
+  trajectory_period: {value: 0.1, unit: s, source: "assumption: RViz trajectory sample spacing (10 Hz)"}
+  trajectory_max_points: {value: 6000, unit: "-", source: "assumption: 10 min of trajectory at 10 Hz"}
 
 # Kinematic limits per operating mode. Speeds/accelerations are magnitudes (>0).
 # DDR-opt has one symmetric acceleration limit: the generator uses min(acceleration, deceleration).

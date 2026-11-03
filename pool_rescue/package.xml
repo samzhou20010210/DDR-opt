@@ -18,6 +18,8 @@
   <depend>tf</depend>
   <depend>tf2_ros</depend>
   <depend>tf2_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>visualization_msgs</depend>
   <depend>carstatemsgs</depend>
 
   <exec_depend>plan_manager</exec_depend>

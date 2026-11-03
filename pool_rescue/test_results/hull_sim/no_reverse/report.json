@@ -1,0 +1,81 @@
+{
+  "config": {
+    "mode": "approach",
+    "v_fwd": 1.0,
+    "v_rev": 0.3,
+    "acc": 0.5,
+    "dec": 0.4,
+    "w_max": 0.8,
+    "w_acc": 1.0,
+    "latency": 0.1,
+    "timeout": 0.5,
+    "reverse": false,
+    "L": 25.0,
+    "W": 12.5,
+    "hl": 0.5,
+    "hw": 0.3
+  },
+  "results": [
+    {
+      "test": "reverse",
+      "reverse_enabled": false,
+      "command": {
+        "v": -0.3
+      },
+      "checks": [
+        {
+          "name": "no backward speed (reverse disabled)",
+          "measured": 0.0,
+          "expected": 0.0,
+          "tol": 1e-09,
+          "unit": "m/s",
+          "pass": true
+        },
+        {
+          "name": "no backward motion",
+          "measured": 0.0,
+          "expected": 0.0,
+          "tol": 1e-09,
+          "unit": "m",
+          "pass": true
+        }
+      ],
+      "pass": true
+    },
+    {
+      "test": "wall_contact",
+      "command": {
+        "v": 0.5,
+        "omega": -0.8,
+        "then_v": null
+      },
+      "checks": [
+        {
+          "name": "hull never outside the pool",
+          "measured": 0.0010705894156324731,
+          "expected": ">= 0.0",
+          "unit": "m",
+          "pass": true
+        },
+        {
+          "name": "wall_contact reported",
+          "measured": 1.0,
+          "expected": ">= 1.0",
+          "unit": "-",
+          "pass": true
+        },
+        {
+          "name": "no motion while the same command pushes into the wall",
+          "measured": 0.0,
+          "expected": "<= 0.0",
+          "unit": "m/s + rad/s",
+          "pass": true
+        }
+      ],
+      "min_hull_wall_margin_m": 0.0010705894156324731,
+      "contact_time_s": 2.5871009826660156,
+      "pass": true
+    }
+  ],
+  "pass": true
+}

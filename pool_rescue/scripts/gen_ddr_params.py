@@ -74,7 +74,7 @@ def build(cfg, mode):
 
     limits = {
         "max_vel": r(v(cfg, m + ".max_forward_speed")),
-        "min_vel": r(-v(cfg, m + ".max_reverse_speed")),
+        "min_vel": r(-v(cfg, m + ".max_reverse_speed")) if v(cfg, "vessel.reverse_enabled") else 0.0,
         # DDR-opt has a single symmetric acceleration limit -> take the tighter one.
         "max_acc": r(min(v(cfg, m + ".max_acceleration"), v(cfg, m + ".max_deceleration"))),
         "max_omega": r(v(cfg, m + ".max_yaw_rate")),

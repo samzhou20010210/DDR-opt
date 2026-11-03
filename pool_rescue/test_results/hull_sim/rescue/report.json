@@ -1,0 +1,314 @@
+{
+  "config": {
+    "mode": "rescue",
+    "v_fwd": 0.5,
+    "v_rev": 0.2,
+    "acc": 0.25,
+    "dec": 0.25,
+    "w_max": 0.4,
+    "w_acc": 0.5,
+    "latency": 0.1,
+    "timeout": 0.5,
+    "reverse": true,
+    "L": 25.0,
+    "W": 12.5,
+    "hl": 0.5,
+    "hw": 0.3
+  },
+  "results": [
+    {
+      "test": "straight",
+      "command": {
+        "v": 0.75,
+        "omega": 0
+      },
+      "checks": [
+        {
+          "name": "response latency",
+          "measured": 0.10613012313842773,
+          "expected": 0.1,
+          "tol": 0.03,
+          "unit": "s",
+          "pass": true
+        },
+        {
+          "name": "acceleration",
+          "measured": 0.24999999892365107,
+          "expected": 0.25,
+          "tol": 0.0075,
+          "unit": "m/s^2",
+          "pass": true
+        },
+        {
+          "name": "steady speed (clamped from 0.75)",
+          "measured": 0.5,
+          "expected": 0.5,
+          "tol": 1e-06,
+          "unit": "m/s",
+          "pass": true
+        },
+        {
+          "name": "max lateral deviation",
+          "measured": 0.0,
+          "expected": "<= 1e-06",
+          "unit": "m",
+          "pass": true
+        },
+        {
+          "name": "max heading drift",
+          "measured": 0.0,
+          "expected": "<= 1e-09",
+          "unit": "rad",
+          "pass": true
+        }
+      ],
+      "distance_m": 1.550038073745579,
+      "pass": true
+    },
+    {
+      "test": "stop",
+      "command": {
+        "v": 0.5,
+        "then": 0
+      },
+      "checks": [
+        {
+          "name": "speed before stop command",
+          "measured": 0.5,
+          "expected": 0.5,
+          "tol": 1e-06,
+          "unit": "m/s",
+          "pass": true
+        },
+        {
+          "name": "response latency",
+          "measured": 0.10778999328613281,
+          "expected": 0.1,
+          "tol": 0.03,
+          "unit": "s",
+          "pass": true
+        },
+        {
+          "name": "deceleration",
+          "measured": 0.2500000000882522,
+          "expected": 0.25,
+          "tol": 0.0075,
+          "unit": "m/s^2",
+          "pass": true
+        },
+        {
+          "name": "stopping time (latency + v/dec)",
+          "measured": 2.1077566146850586,
+          "expected": 2.1,
+          "tol": 0.03,
+          "unit": "s",
+          "pass": true
+        },
+        {
+          "name": "stopping distance (v*latency + v^2/2dec)",
+          "measured": 0.5499965585402102,
+          "expected": 0.55,
+          "tol": 0.025,
+          "unit": "m",
+          "pass": true
+        },
+        {
+          "name": "creep after stop",
+          "measured": 0.0,
+          "expected": "<= 0.0",
+          "unit": "m/s",
+          "pass": true
+        }
+      ],
+      "pass": true
+    },
+    {
+      "test": "turn_in_place",
+      "command": {
+        "v": 0,
+        "omega": 0.4,
+        "then": 0
+      },
+      "checks": [
+        {
+          "name": "response latency",
+          "measured": 0.10144329071044922,
+          "expected": 0.1,
+          "tol": 0.03,
+          "unit": "s",
+          "pass": true
+        },
+        {
+          "name": "yaw acceleration",
+          "measured": 0.49999999375475174,
+          "expected": 0.5,
+          "tol": 0.015,
+          "unit": "rad/s^2",
+          "pass": true
+        },
+        {
+          "name": "steady yaw rate",
+          "measured": 0.39999999999999925,
+          "expected": 0.4,
+          "tol": 1e-06,
+          "unit": "rad/s",
+          "pass": true
+        },
+        {
+          "name": "yaw deceleration",
+          "measured": 0.4999999820794318,
+          "expected": 0.5,
+          "tol": 0.015,
+          "unit": "rad/s^2",
+          "pass": true
+        },
+        {
+          "name": "position drift (turning in place)",
+          "measured": 0.0,
+          "expected": "<= 1e-06",
+          "unit": "m",
+          "pass": true
+        },
+        {
+          "name": "turns counter-clockwise for omega > 0",
+          "measured": 1.1600150711731618,
+          "expected": ">= 0.0",
+          "unit": "rad",
+          "pass": true
+        }
+      ],
+      "yaw_change_rad": 1.1600150711731618,
+      "pass": true
+    },
+    {
+      "test": "arc_turn",
+      "command": {
+        "v": 0.25,
+        "omega": 0.2
+      },
+      "checks": [
+        {
+          "name": "steady turn radius (v/omega)",
+          "measured": 1.249999999999995,
+          "expected": 1.25,
+          "tol": 0.012499999999999999,
+          "unit": "m",
+          "pass": true
+        }
+      ],
+      "pass": true
+    },
+    {
+      "test": "reverse",
+      "reverse_enabled": true,
+      "command": {
+        "v": -0.2
+      },
+      "checks": [
+        {
+          "name": "reverse speed reached",
+          "measured": -0.2,
+          "expected": -0.2,
+          "tol": 1e-06,
+          "unit": "m/s",
+          "pass": true
+        },
+        {
+          "name": "response latency",
+          "measured": 0.1009972095489502,
+          "expected": 0.1,
+          "tol": 0.03,
+          "unit": "s",
+          "pass": true
+        },
+        {
+          "name": "reverse acceleration",
+          "measured": 0.24999999596457276,
+          "expected": 0.25,
+          "tol": 0.0075,
+          "unit": "m/s^2",
+          "pass": true
+        },
+        {
+          "name": "moved backwards (x decreased)",
+          "measured": -0.48397834106643334,
+          "expected": "<= -0.1",
+          "unit": "m",
+          "pass": true
+        }
+      ],
+      "pass": true
+    },
+    {
+      "test": "wall_contact",
+      "command": {
+        "v": 0.25,
+        "omega": -0.4,
+        "then_v": -0.2
+      },
+      "checks": [
+        {
+          "name": "hull never outside the pool",
+          "measured": 0.0006175585010621196,
+          "expected": ">= 0.0",
+          "unit": "m",
+          "pass": true
+        },
+        {
+          "name": "wall_contact reported",
+          "measured": 1.0,
+          "expected": ">= 1.0",
+          "unit": "-",
+          "pass": true
+        },
+        {
+          "name": "no motion while the same command pushes into the wall",
+          "measured": 0.0,
+          "expected": "<= 0.0",
+          "unit": "m/s + rad/s",
+          "pass": true
+        },
+        {
+          "name": "recovers by reversing away",
+          "measured": 0.3200038763166948,
+          "expected": ">= 0.05",
+          "unit": "m",
+          "pass": true
+        },
+        {
+          "name": "contact cleared after recovery",
+          "measured": 1.0,
+          "expected": ">= 1.0",
+          "unit": "-",
+          "pass": true
+        }
+      ],
+      "min_hull_wall_margin_m": 0.0006175585010621196,
+      "contact_time_s": 4.644789934158325,
+      "pass": true
+    },
+    {
+      "test": "cmd_timeout",
+      "checks": [
+        {
+          "name": "decel starts after latency + timeout",
+          "measured": 0.5804064273834229,
+          "expected": 0.6,
+          "tol": 0.05,
+          "unit": "s",
+          "pass": true
+        },
+        {
+          "name": "stopped",
+          "measured": 0.0,
+          "expected": 0.0,
+          "tol": 1e-09,
+          "unit": "m/s",
+          "pass": true
+        }
+      ],
+      "pass": true
+    }
+  ],
+  "pass": true
+}

@@ -12,6 +12,63 @@ python3 pool_rescue/scripts/check_params.py                # offline: schema, sa
 rosrun pool_rescue check_params.py --live --mode approach  # against a running stack (also run by the launch file)
 ```
 
+There are two independent stacks. **Never launch both at once**: each one has its own single publisher of
+`/pool/robot/odom` and of the `world→base_link` TF.
+
+| Launch | What runs | Owner of `/pool/robot/odom` and `world→base_link` |
+|---|---|---|
+| `pool_hull_sim.launch` | `pool_env` + `hull_sim` (no planner) | `hull_sim` |
+| `pool_sim.launch` | DDR-opt planner, MPC, legacy simulator, EKF + `ddr_adapter` | `ddr_adapter` |
+
+## 0. Pool environment and hull simulator (`pool_hull_sim.launch`)
+
+```bash
+roslaunch pool_rescue pool_hull_sim.launch [mode:=approach|rescue] [gui:=false] [reverse_enabled:=true|false]
+rostopic pub -r 20 /pool/cmd_vel geometry_msgs/Twist '{linear: {x: 0.5}, angular: {z: 0.3}}'
+rosservice call /hull_sim/reset                 # back to standby, at rest
+rosrun pool_rescue hull_tests.py --out /tmp/hull_tests [--tests straight stop turn arc reverse wall timeout]
+```
+
+**`pool_env`** (`scripts/pool_env.py`) reads `/pool/pool/*`, `/pool/standby/*` and `/pool/extraction_zone/*` and
+publishes, latched:
+- `/pool/env/boundary` (`PolygonStamped`): the water rectangle [0, L] × [0, W] in `world`.
+- `/pool/env/markers` (`MarkerArray`): water, walls (drawn just outside the boundary), boundary line, standby
+  outline, extraction zone, labels.
+
+**`hull_sim`** (`src/hull_sim.cpp`) reads `/pool/mode` and `/pool/<group>/<name>/value`.
+
+| | |
+|---|---|
+| Input | `/pool/cmd_vel` (`Twist`): `linear.x` = target speed [m/s], `angular.z` = target yaw rate [rad/s] |
+| Latency | each command takes effect after `control.latency` |
+| Limits | target clamped to [−max_reverse_speed, max_forward_speed] and ±max_yaw_rate of the active mode; reverse clamps to 0 if `vessel.reverse_enabled` is false |
+| Speed | rises at `max_acceleration` and falls at `max_deceleration`; a sign change decelerates to 0 first |
+| Yaw rate | changes at `max_yaw_accel` |
+| Integration | unicycle at `simulation.hull_sim_rate` (trapezoidal v/ω, midpoint heading); no sway, drag or currents |
+| Lost link | no command for `control.cmd_timeout` → target (0, 0) |
+| Walls | the hull rectangle (`vessel.length × width`) must stay inside the pool. A step that would push a corner out is rejected (pose kept, v = ω = 0, `/pool/robot/wall_contact` = true). Contact stays latched while the same target keeps arriving; any other target may move the hull again |
+| Startup | the node exits with an error unless the whole hull at the standby pose is ≥ `safety.wall_clearance` from every wall |
+| Output | `/pool/robot/odom` (`Odometry`, stamped, `world`→`base_link`, body-frame twist), TF `world→base_link`, `/pool/hull_sim/target` (`TwistStamped`: target after latency + clamping), `/pool/robot/wall_contact` (`Bool`, latched), `/pool/robot/trajectory` (`Path`, every `simulation.trajectory_period`), `/pool/robot/hull_markers` (outline + heading arrow in `base_link`) |
+| Service | `/hull_sim/reset` (`std_srvs/Empty`) |
+
+RViz config: `rviz/pool.rviz`, a top-down view of the whole pool showing the Pool markers, Trajectory, Hull and TF.
+
+**Response tests** (`scripts/hull_tests.py`): each test resets the vessel, sends a timed `/pool/cmd_vel` schedule
+at 50 Hz, records odometry, and compares the measured response with the prediction from the config:
+
+| Test | Measured |
+|---|---|
+| `straight` | latency, acceleration, steady speed (commanded at 1.5 × limit, so clamping shows), lateral and heading drift |
+| `stop` | latency, deceleration, stopping time, stopping distance, creep after the stop |
+| `turn` | latency, yaw acceleration and deceleration, steady yaw rate, position drift while turning in place |
+| `arc` | steady turn radius = v / ω |
+| `reverse` | reverse speed, acceleration and direction; with reverse disabled, no backward motion |
+| `wall` | hull never outside the pool, contact reported, no motion while pushing, recovery by reversing |
+| `timeout` | stop after latency + cmd_timeout without commands |
+
+Outputs: `<test>.csv`, `<test>.png` and `report.json`; exit code 0 means all checks passed. Recorded results are in
+`test_results/hull_sim/`.
+
 ## 1. Parameters
 
 `config/pool_rescue.yaml` is the **only** file to edit. Every leaf is `{value, unit, source}`; `source` is

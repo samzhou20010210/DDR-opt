@@ -1,0 +1,20 @@
+<launch>
+  <!-- Pool environment + simplified hull simulator (no planner, no DDR-opt nodes).
+       Drive it with geometry_msgs/Twist on /pool/cmd_vel, e.g.
+         rostopic pub -r 20 /pool/cmd_vel geometry_msgs/Twist '{linear: {x: 0.5}, angular: {z: 0.0}}'
+       All values come from config/pool_rescue.yaml (loaded under /pool). -->
+
+  <arg name="mode" default="approach"/>          <!-- approach | rescue : selects /pool/modes/<mode>/* limits -->
+  <arg name="gui" default="true"/>               <!-- false = headless (no rviz) -->
+  <arg name="reverse_enabled" default=""/>       <!-- "" = use config; true/false overrides vessel.reverse_enabled -->
+
+  <rosparam file="$(find pool_rescue)/config/pool_rescue.yaml" command="load" ns="pool"/>
+  <param name="/pool/mode" value="$(arg mode)"/>
+  <param if="$(eval reverse_enabled != '')" name="/pool/vessel/reverse_enabled/value" value="$(arg reverse_enabled)"/>
+
+  <node name="pool_env" pkg="pool_rescue" type="pool_env.py" output="screen"/>
+  <!-- single publisher of world -> base_link in this stack -->
+  <node name="hull_sim" pkg="pool_rescue" type="hull_sim" output="screen" required="true"/>
+
+  <node if="$(arg gui)" name="rviz" pkg="rviz" type="rviz" args="-d $(find pool_rescue)/rviz/pool.rviz" output="log"/>
+</launch>

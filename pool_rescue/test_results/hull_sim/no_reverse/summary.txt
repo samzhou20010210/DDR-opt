@@ -1,0 +1,8 @@
+== reverse: PASS
+  [PASS] no backward speed (reverse disabled)          measured 0.0000       expected 0.0000 +/- 0.0000 m/s
+  [PASS] no backward motion                            measured 0.0000       expected 0.0000 +/- 0.0000 m
+== wall_contact: PASS
+  [PASS] hull never outside the pool                   measured 0.0011       expected >= 0.0 m
+  [PASS] wall_contact reported                         measured 1.0000       expected >= 1.0 -
+  [PASS] no motion while the same command pushes into the wall measured 0.0000       expected <= 0.0 m/s + rad/s
+RESULT: PASS | artifacts: no_reverse

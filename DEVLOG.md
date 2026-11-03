@@ -189,6 +189,7 @@ accepted. If the failure happens during a replan (robot already moving), it firs
 | 2026-11-03 | Created this log: baseline analysis, interfaces, assumptions for the pool-rescue extension. No code changed. | `DEVLOG.md` |
 | 2026-11-03 | Headless workflow: `gui` (default true) and `map_seed` (default −1) args in `planner_sim.launch` — defaults keep stock behaviour; headless runner + automated goal/trajectory/control/motion check; baseline results recorded. | `plan_manager/launch/planner_sim.launch`, `scripts/run_headless_sim.sh`, `scripts/smoke_test.py`, `DEVLOG.md` |
 | 2026-11-03 | New package `pool_rescue`: central annotated config (49 params, value/unit/source), generator → per-node DDR-opt params for `approach`/`rescue`, messages (Person, PersonArray, ExtractionZone, RescueTask), C++ `ddr_adapter` (Twist/Odometry interfaces, latency, single `world→base_link` TF), `pool_sim.launch`, offline + live validator. Stock example untouched. See §5. | `pool_rescue/**`, `DEVLOG.md` |
+| 2026-11-03 | Stage 2, pool environment + hull simulator: `pool_env` (boundary + RViz markers from config), C++ `hull_sim` (latency, asymmetric accel/decel, yaw accel, reverse switch, cmd timeout, wall contact, standby validity check, odom/TF/trajectory/hull markers, reset service), `pool_hull_sim.launch`, `rviz/pool.rviz`, `hull_tests.py`; 5 new central params; the generator gives the planner `min_vel = 0` when reverse is disabled. See §6. | `pool_rescue/**`, `DEVLOG.md` |
 | 2026-11-03 | Fix planner segfault when JPS finds no path: `findJPSRoad()` returns false; `MainThread` drops the goal → `IDLE` (emergency stop first if replanning). Verified: seeds 1/3 no crash + recovery to a new goal; seeds 2/4 PASS, seed 2 plan identical. | `plan_manager/include/plan_manager/plan_manager.hpp`, `DEVLOG.md` |
 
 ---
@@ -245,7 +246,74 @@ is defined but not used); mode switching requires a relaunch; the dynamics are s
 
 ---
 
-## 6. Open questions
+## 6. Stage 2: pool environment and hull simulator (no planner)
+
+`roslaunch pool_rescue pool_hull_sim.launch`. Interfaces and model are described in `pool_rescue/README.md` §0.
+The hull simulator is a new node and does not use DDR-opt's `simulator`.
+
+New central parameters:
+- `vessel.reverse_enabled` (true)
+- `control.cmd_timeout` (0.5 s)
+- `simulation.hull_sim_rate` (100 Hz)
+- `simulation.trajectory_period` (0.1 s)
+- `simulation.trajectory_max_points` (6000)
+
+The validator now checks 54 annotated parameters.
+
+**Model assumptions:**
+- Kinematic unicycle with rate-limited v and ω, and a pure transport delay on commands.
+- No sway, drag, inertia beyond the rate limits, waves or currents.
+- Walls are a hard stop for the hull rectangle (no bounce).
+
+**Recorded responses** (2026-11-03, headless; full data in `pool_rescue/test_results/hull_sim/`). Expected values
+come from the config; all checks pass in both modes:
+
+| Test | Quantity | approach: expected / measured | rescue: expected / measured |
+|---|---|---|---|
+| straight (cmd 1.5 × limit) | latency | 0.100 / 0.101 s | 0.100 / 0.106 s |
+| | acceleration | 0.50 / 0.500 m/s² | 0.25 / 0.250 m/s² |
+| | steady speed (clamped) | 1.00 / 1.000 m/s | 0.50 / 0.500 m/s |
+| | lateral / heading drift | 0 / 0 | 0 / 0 |
+| stop | latency | 0.100 / 0.107 s | 0.100 / 0.108 s |
+| | deceleration | 0.40 / 0.400 m/s² | 0.25 / 0.250 m/s² |
+| | stopping time (L + v/dec) | 2.600 / 2.597 s | 2.100 / 2.108 s |
+| | stopping distance (v·L + v²/2dec) | 1.350 / 1.350 m | 0.550 / 0.550 m |
+| | creep after stop | 0 / 0 | 0 / 0 |
+| turn in place | latency | 0.100 / 0.108 s | 0.100 / 0.101 s |
+| | yaw accel / decel | 1.00 / 1.000, 1.000 rad/s² | 0.50 / 0.500, 0.500 rad/s² |
+| | steady yaw rate | 0.80 / 0.800 rad/s | 0.40 / 0.400 rad/s |
+| | position drift | 0 / 0 | 0 / 0 |
+| arc (v = ½ v_max, ω = ½ ω_max) | radius v/ω | 1.250 / 1.250 m | 1.250 / 1.250 m |
+| reverse | speed / accel | −0.30 / −0.300 m/s, 0.50 / 0.500 m/s² | −0.20 / −0.200 m/s, 0.25 / 0.250 m/s² |
+| reverse, disabled (approach) | backward speed / motion | 0 / 0, 0 / 0 | n/a |
+| wall contact | min hull-wall margin / motion while pushing | ≥ 0 / 0.0009 m, 0 | ≥ 0 / 0.0006 m, 0 |
+| | recovery by reversing | ≥ 0.05 / 0.51 m | ≥ 0.05 / 0.32 m |
+| cmd timeout | decel starts after L + timeout | 0.600 / 0.582 s | 0.600 / 0.580 s |
+
+- **Measured latency** is the configured 0.1 s plus up to one 10 ms simulation tick plus ROS transport.
+- **The timeout fires about 20 ms early** relative to the time the test stopped publishing, because the last
+  command left the test node up to one 20 ms publish period earlier.
+- **Invalid standby is rejected:** at x = 0.3 m the node exits with
+  `standby pose ... leaves only -0.2 m between hull and wall, need 0.3 m`.
+
+Issues found and fixed during testing:
+1. **Test bug:** the ramp-slope helper mixed the ramp-up with the later ramp-down in the turn and reverse tests,
+   giving ≈ 0 rad/s². It now uses the first contiguous ramp only.
+2. **Model bug:** at wall contact the hull chattered (about 0.03 m/s spikes for about 0.1 s) because each tick
+   re-accelerated from zero. Contact is now latched while the same target keeps arriving.
+
+**RViz:** `rviz/pool.rviz` was opened on the desktop and the RViz log shows no errors. All published visualization
+data was checked headlessly:
+- 6 environment marker groups in `world`, boundary polygon 25 × 12.5 m
+- hull outline 1.0 × 0.6 m and heading arrow in `base_link`
+- trajectory growing in `world`
+- `world→base_link` resolvable
+
+A screenshot check was abandoned, because without a compositor `xwd` also captures overlapping windows.
+
+---
+
+## 7. Open questions
 
 - Full mission spec beyond "start from a standby position near a corner": victim detection, pickup behaviour,
   return-to-base, time limits?
