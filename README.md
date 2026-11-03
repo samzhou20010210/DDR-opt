@@ -43,6 +43,15 @@ cd ..
 catkin build
 ```
 
+### IMPORTANT: For this device, run the following commends before running plan_manager launch files  ###
+``` bash
+cd ~/main/pr_robot/DDRopt_ws
+source /opt/ros/noetic/setup.bash
+catkin build
+source devel/setup.bash    ## Must run this command
+rospack find plan_manager
+```
+
 ### Run
 You can run any of the following: 
 ``` bash

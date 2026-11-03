@@ -1,51 +1,53 @@
 <launch> 
   <!-- Whether the start and end points are fixed -->
-  <arg name="if_fix_final_" value="false"/> 
+  <!--起始点配置-->
+  <arg name="if_fix_final_" value="false"/>  <!-- 终点是否固定 -->
   <!-- <arg name="if_fix_final_" value="true"/> -->
-  <arg name="start_x_" value="-7.75"/>
-  <arg name="start_y_" value="-0.5"/>
-  <arg name="start_yaw_" value="0.0"/>
-  <arg name="final_x_" value="3.7"/>
-  <arg name="final_y_" value="0.3"/>
-  <arg name="final_yaw_" value="3.14"/>
+  <arg name="start_x_" value="-7.75"/>       <!-- 起点 x -->
+  <arg name="start_y_" value="-0.5"/>        <!-- 起点 y -->
+  <arg name="start_yaw_" value="0.0"/>       <!-- 起点朝向 -->
+  <arg name="final_x_" value="3.7"/>         <!-- 终点 x -->
+  <arg name="final_y_" value="0.3"/>         <!-- 终点 y -->
+  <arg name="final_yaw_" value="3.14"/>      <!-- 终点朝向（≈π） -->
 
-  <!-- Map resolution -->
-  <arg name="gridmap_interval_" value="0.1"/> 
+  <!-- Map resolution 地图分辨率-->
+  <arg name="gridmap_interval_" value="0.1"/> <!-- 栅格地图每格 0.1m -->
 
-  <arg name="odom_topic" value="/ICREKF/EKF_XYTheta" />
-  <arg name="traj_topic" value="/planner/traj_poly" />
-  <arg name="cmd_topic" value="/simulation/PoseSub" />
+  <arg name="odom_topic" value="/ICREKF/EKF_XYTheta" />  <!-- EKF 输出的里程计 -->
+  <arg name="traj_topic" value="/planner/traj_poly" />   <!-- 规划器输出的多项式轨迹 -->
+  <arg name="cmd_topic" value="/simulation/PoseSub" />   <!-- 控制指令 -->
 
   <arg name="velocity_suffix" value="3ms"/>
 
   <!-- Whether the robot is allowed to see through obstacles -->
-  <arg name="if_perspective_" value="true"/>
+  <arg name="if_perspective_" value="true"/>    <!-- 是否使用透视激光（可穿透障碍） -->
   <!-- <arg name="if_perspective_" value="false"/> -->
 
   <!-- Detection range -->
-  <arg name="detection_range_" value="27.0"/>
+  <arg name="detection_range_" value="27.0"/>   <!-- 探测距离 27m -->
   <!-- <arg name="detection_range_" value="7.0"/> -->
 
   <!-- Whether the robot is allowed to move -->
-  <arg name="if_move_" value="true"/>
+  <arg name="if_move_" value="true"/>   <!-- 是否让机器人实际移动（启动 MPC） -->
   <!-- <arg name="if_move_" value="false"/> -->
 
   <!-- Whether to limit the robot's FOV. Note: In complex environments, limiting the FOV may cause planning to fail -->
   <!-- <arg name="hrz_limited_" value="true"/> -->
-  <arg name="hrz_limited_" value="false"/>
+  <arg name="hrz_limited_" value="false"/>    <!-- 是否限制水平 FOV -->
 
   <!-- FOV angle range -->
-  <arg name="hrz_laser_range_dgr_" value="90.0"/>
+  <arg name="hrz_laser_range_dgr_" value="90.0"/>  <!-- FOV 角度 90° -->
 
   <!-- ICR parameters -->
-  <arg name="ICR_yr_" value="-0.3"/>
-  <arg name="ICR_yl_" value="0.3"/>
-  <arg name="ICR_xv_" value="0.2"/>
+  <arg name="ICR_yr_" value="-0.3"/>    <!-- 右轮 ICR y 坐标 -->
+  <arg name="ICR_yl_" value="0.3"/>     <!-- 左轮 ICR y 坐标 -->
+  <arg name="ICR_xv_" value="0.2"/>     <!-- 前向 ICR x 坐标 -->
 
   <!-- Whether to use the standard differential model -->
-  <arg name="if_standard_diff_" value="true"/>
-
+  <arg name="if_standard_diff_" value="true"/>   <!-- 是否使用标准差速模型 -->
+  <!--true = 标准差速；false = 使用 ICR 参数的非标准差速-->
   
+  <!--global_planning — 全局规划节点-->
   <node name="global_planning" pkg="plan_manager" type="global_planning" output="screen">
     <rosparam file="$(find front_end)/config/jps$(arg velocity_suffix).yaml" command="load"/>
     <rosparam file="$(find plan_manager)/config/car$(arg velocity_suffix).yaml" command="load"/>
