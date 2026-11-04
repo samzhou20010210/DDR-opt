@@ -5,14 +5,15 @@
   <!-- Headless support: gui:=false skips rviz and plotjuggler -->
   <arg name="gui" default="true"/>
   <!-- Random map seed (Map_input_method 2): -1 = seed from time; fixed value = reproducible map -->
-  <arg name="map_seed" default="-1"/>
-  <!-- obstacle map: rov uses obs5_rov (obs5 minus 2 boxes), car the original obs5 -->
-  <arg name="obs_map" value="$(eval 'obs5_rov' if robot == 'rov' else 'obs5')"/>
+  <!-- ROV environment (all three launch files): 20 random 1 m boxes, seed 10, start (-7.75, -0.5).
+       Sized so the 1.04 m ROV fits in ~60% of the map (car on its stock maps: 52-66%) and every place it fits
+       is reachable from the start; the stock maps leave the ROV only 19-50% fit area. map_seed:=-1 = new random map. -->
+  <arg name="map_seed" default="$(eval 10 if robot == 'rov' else -1)"/>
   <!-- Whether the start and end points are fixed -->
   <arg name="if_fix_final_" value="false"/> 
   <!-- <arg name="if_fix_final_" value="true"/> -->
-  <arg name="start_x_" value="$(eval -7.1 if robot == 'rov' else -9.0)"/>  <!-- rov: nearest spot with >= 1.12 m clearance in obs5 -->
-  <arg name="start_y_" value="$(eval -6.1 if robot == 'rov' else -9.0)"/>
+  <arg name="start_x_" value="$(eval -7.75 if robot == 'rov' else -9.0)"/>
+  <arg name="start_y_" value="$(eval -0.5 if robot == 'rov' else -9.0)"/>
   <arg name="start_yaw_" value="0.0"/>
   <arg name="final_x_" value="3.7"/>
   <arg name="final_y_" value="0.3"/>
@@ -139,7 +140,7 @@
     <!-- 1: Read map from yaml file -->
     <!-- 2: Random obstacles -->
     <!-- 3: Get obstacles from png -->
-    <param name="Map_input_method" value="1"/>
+    <param name="Map_input_method" value="$(eval 2 if robot == 'rov' else 1)"/>  <!-- rov: random, car: obs5 -->
     <param name="if_boundary_wall" value="true"/>
     <!-- gridmap cell size -->
     <param name="gridmap_interval" value="$(arg gridmap_interval_)"/>
@@ -147,8 +148,7 @@
     <param name="laser_gridmap_interval" value="$(arg gridmap_interval_)"/>
     <!-- Read map parameters from yaml file -->
     <!-- Map file name -->
-    <!-- rov: obs5 minus the 2 boxes that boxed in the ROV start (see obs5_rov.yaml header) -->
-    <rosparam file="$(find plan_env)/config/$(arg obs_map).yaml" command="load"/>
+    <rosparam file="$(find plan_env)/config/obs5.yaml" command="load"/>
     <!-- Random obstacles -->
     <!-- Map file name -->
     <param name="start_x" value="$(arg start_x_)"/>
@@ -160,9 +160,9 @@
     <param name="Random/map_range/y_min" value="-10"/>
     <param name="Random/map_range/y_max" value="10"/>
     <!-- Square obstacles -->
-    <param name="Random/obstacle_box/num" value="80"/>
-    <param name="Random/obstacle_box/length" value="0.8"/>
-    <param name="Random/obstacle_box/safe_dis" value="2.0"/>
+    <param name="Random/obstacle_box/num" value="$(eval 20 if robot == 'rov' else 80)"/>
+    <param name="Random/obstacle_box/length" value="$(eval 1.0 if robot == 'rov' else 0.8)"/>
+    <param name="Random/obstacle_box/safe_dis" value="$(eval 3.0 if robot == 'rov' else 2.0)"/>
     <!-- Get obstacles from png -->
     <param name="Png/file_path" value="$(find plan_env)/config/obs.png"/>
     <param name="Png/x_lower" value="-5.0"/>

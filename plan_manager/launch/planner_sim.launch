@@ -5,8 +5,10 @@
   <!-- Headless support: gui:=false skips rviz and plotjuggler -->
   <arg name="gui" default="true"/>
   <!-- Random map seed (Map_input_method 2): -1 = seed from time; fixed value = reproducible map -->
-  <!-- rov default 4: a seed with a >= 1.022 m-clearance route to the goal; -1 = new random map each launch -->
-  <arg name="map_seed" default="$(eval 4 if robot == 'rov' else -1)"/>
+  <!-- ROV environment (all three launch files): 20 random 1 m boxes, seed 10, start (-7.75, -0.5).
+       Sized so the 1.04 m ROV fits in ~60% of the map (car on its stock maps: 52-66%) and every place it fits
+       is reachable from the start; the stock maps leave the ROV only 19-50% fit area. map_seed:=-1 = new random map. -->
+  <arg name="map_seed" default="$(eval 10 if robot == 'rov' else -1)"/>
   <!-- Whether the start and end points are fixed -->
   <!--起始点配置-->
   <arg name="if_fix_final_" value="false"/>  <!-- 终点是否固定 -->
@@ -160,8 +162,7 @@
     <param name="Random/map_range/y_min" value="-10"/>
     <param name="Random/map_range/y_max" value="10"/>
     <!-- Square obstacles -->
-    <!-- rov: 30 boxes; with 100 no seed of 1-40 leaves a route wide enough for the 1.04 m ROV + margin -->
-    <param name="Random/obstacle_box/num" value="$(eval 30 if robot == 'rov' else 100)"/>
+    <param name="Random/obstacle_box/num" value="$(eval 20 if robot == 'rov' else 100)"/>
     <param name="Random/obstacle_box/length" value="1.0"/>
     <param name="Random/obstacle_box/safe_dis" value="3.0"/>
     <!-- Get obstacles from png -->

@@ -76,10 +76,14 @@ roslaunch plan_manager planner_sim.launch robot:=car      # original scout_mini 
   - Limits are placeholders until mass, drag and T500 thrust data exist: 1.0 / −0.3 m/s, 0.4 m/s², 0.8 rad/s.
   - DDR-opt treats the ROV as a differential-drive robot (surge + yaw). It doesn't use the ROV's sideways (sway)
     ability.
-- **Environments** for the ROV, which is too large for the car's maps:
-  - `planner_sim`: 30 random boxes instead of 100, default `map_seed` 4. `map_seed:=-1` gives a new random map,
-    with a route in about 40% of seeds.
-  - `planner_nmpc` / `planner_sim_unknown`: `obs5_rov.yaml` (`obs5` minus 2 boxes), start (−7.1, −6.1).
+- **Environment** for the ROV, the same in all three launch files: 20 random 1 m boxes, `map_seed` 10, start
+  (−7.75, −0.5).
+  - The stock maps (100 boxes, or `obs5` with 65) leave the 1.04 m ROV room in only 19–50% of the map.
+  - With this map it fits in about 60% of the map (the car on its stock maps: 52–66%), and every place it fits is
+    reachable.
+  - Goals must be at least ~0.9 m from boxes and walls (the ROV's clearance), otherwise the planner reports
+    `Goal dropped` and stays still.
+  - `map_seed:=-1` gives a new random map.
 - Other args: `gui:=false` (no rviz/plotjuggler), `map_seed:=N`.
 - Headless check: `scripts/run_headless_sim.sh --launch planner_sim|planner_nmpc|planner_sim_unknown --robot rov|car`
   (exit 0 = PASS).
