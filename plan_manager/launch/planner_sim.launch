@@ -1,4 +1,12 @@
 <launch> 
+  <!-- Robot model: rov = ROV V4 (default, ROV_simple_model_V4), car = original scout_mini car.
+       rov loads plan_manager/config/robot_rov.yaml on top of the stock configs (limits, collision circle, mesh). -->
+  <arg name="robot" default="rov"/>
+  <!-- Headless support: gui:=false skips rviz and plotjuggler -->
+  <arg name="gui" default="true"/>
+  <!-- Random map seed (Map_input_method 2): -1 = seed from time; fixed value = reproducible map -->
+  <!-- rov default 4: a seed with a >= 1.022 m-clearance route to the goal; -1 = new random map each launch -->
+  <arg name="map_seed" default="$(eval 4 if robot == 'rov' else -1)"/>
   <!-- Whether the start and end points are fixed -->
   <!--起始点配置-->
   <arg name="if_fix_final_" value="false"/>  <!-- 终点是否固定 -->
@@ -53,6 +61,7 @@
     <rosparam file="$(find plan_manager)/config/car$(arg velocity_suffix).yaml" command="load"/>
     <rosparam file="$(find back_end)/config/global_planning$(arg velocity_suffix).yaml" command="load"/>
     <rosparam file="$(find plan_env)/config/mapsim.yaml" command="load"/>
+    <rosparam if="$(eval robot == 'rov')" file="$(find plan_manager)/config/robot_rov.yaml" command="load"/>
     <param name="start_x" value="$(arg start_x_)"/>
     <param name="start_y" value="$(arg start_y_)"/>
     <param name="start_yaw" value="$(arg start_yaw_)"/>
@@ -92,6 +101,7 @@
 
   <node name="simulator" pkg="simulator" type="simulator" output="screen">
     <rosparam file="$(find plan_manager)/config/car$(arg velocity_suffix).yaml" command="load"/>
+    <rosparam if="$(eval robot == 'rov')" file="$(find plan_manager)/config/robot_rov.yaml" command="load"/>
     <param name="start_x" value="$(arg start_x_)"/>
     <param name="start_y" value="$(arg start_y_)"/>
     <param name="start_yaw" value="$(arg start_yaw_)"/>
@@ -115,6 +125,7 @@
     <node name="mpc" pkg="mpc_controller" type="mpc" output="screen">
       <rosparam file="$(find mpc_controller)/config/mpc$(arg velocity_suffix).yaml" command="load"/>
       <rosparam file="$(find plan_manager)/config/car$(arg velocity_suffix).yaml" command="load"/>
+      <rosparam if="$(eval robot == 'rov')" file="$(find plan_manager)/config/robot_rov.yaml" command="load"/>
       <param name="if_mpc" value="true"/>
       <remap from="~cmd" to="$(arg cmd_topic)"/>
       <remap from="~odom" to="/ICREKF/EKF_XYTheta"/>
@@ -122,7 +133,7 @@
     </node>
   </group>
 
-  <node name="plotjuggler" pkg="plotjuggler" type="plotjuggler" output="screen" args="-l $(find plan_manager)/plotjuggler/plotjuggler.xml"/>
+  <node if="$(arg gui)" name="plotjuggler" pkg="plotjuggler" type="plotjuggler" output="screen" args="-l $(find plan_manager)/plotjuggler/plotjuggler.xml"/>
 
   <node name="global_map_node" pkg="simulator" type="global_map_node" output="screen">
     <!-- Map input method -->
@@ -143,13 +154,14 @@
     <param name="start_x" value="$(arg start_x_)"/>
     <param name="start_y" value="$(arg start_y_)"/>
     <param name="start_yaw" value="$(arg start_yaw_)"/>
-    <param name="srand_num" value="-1"/>
+    <param name="srand_num" value="$(arg map_seed)"/>
     <param name="Random/map_range/x_min" value="-10"/>
     <param name="Random/map_range/x_max" value="10"/>
     <param name="Random/map_range/y_min" value="-10"/>
     <param name="Random/map_range/y_max" value="10"/>
     <!-- Square obstacles -->
-    <param name="Random/obstacle_box/num" value="100"/>
+    <!-- rov: 30 boxes; with 100 no seed of 1-40 leaves a route wide enough for the 1.04 m ROV + margin -->
+    <param name="Random/obstacle_box/num" value="$(eval 30 if robot == 'rov' else 100)"/>
     <param name="Random/obstacle_box/length" value="1.0"/>
     <param name="Random/obstacle_box/safe_dis" value="3.0"/>
     <!-- Get obstacles from png -->
@@ -209,6 +221,6 @@
 
 
 
-  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find plan_manager)/rviz/planner_sim.rviz" output="log"/>
+  <node if="$(arg gui)" name="rviz" pkg="rviz" type="rviz" args="-d $(find plan_manager)/rviz/planner_sim.rviz" output="log"/>
 
 </launch> 

@@ -33,3 +33,7 @@
 
 ./CMakeLists.txt
 .vscode
+
+# Python
+__pycache__/
+*.pyc

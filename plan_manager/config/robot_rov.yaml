@@ -1,0 +1,45 @@
+# ROV V4 robot overlay (ROV_simple_model_V4: 1.0 x 0.8 x 0.3 m hull, 8 x T500, assembly 1.0 x 1.043 x 0.3 m).
+# Loaded with robot:=rov (the default) AFTER the stock car<suffix>/jps<suffix>/global_planning<suffix> files inside
+# global_planning, simulator and mpc / nmpc, so only the keys below differ from the original car.
+#
+# Motion model: DDR-opt plans for a differential-drive robot. The ROV's 4 horizontal X-layout thrusters can also
+# sway (planar allocation rank 3); DDR-opt uses only surge + yaw, which the ROV can always fly.
+
+# ---------------------------------------------------------------- kinematic limits
+# PLACEHOLDERS (assumption): mass, drag and T500 thrust curves are not given in simulation_parameters.json.
+# Replace with values derived from thrust/drag once known.
+max_vel:                        1.0     # m/s   forward surge
+min_vel:                        -0.3    # m/s   reverse surge (propellers weaker in reverse)
+max_acc:                        0.4     # m/s^2 single symmetric limit in DDR-opt (= min of accel / decel)
+max_omega:                      0.8     # rad/s yaw rate
+max_domega:                     1.0     # rad/s^2 yaw acceleration
+max_centripetal_acc:            0.5     # m/s^2 |v * omega|
+if_directly_constrain_v_omega:  false   # v and omega share the thrust budget (stock behaviour)
+
+# ---------------------------------------------------------------- collision model (circle, defined once here)
+# collision radius r = hypot(1.0/2, 1.043/2) = 0.722 m  (assembly incl. protruding horizontal thrusters)
+# safety margin    m = 0.30 m
+# optimizer target   r + m   = 1.022 m : centre ESDF below this is penalised (safeDis, soft)
+# path search        r + m/2 = 0.872 m : JPS blocks cells closer than this (jps_safe_dis)
+# verification       r       = 0.722 m : a trajectory whose centre comes closer than r is rejected (finalMinSafeDis)
+# The search threshold is deliberately m/2 below the optimizer target (hysteresis): the optimizer drives
+# trajectories onto its 1.022 m target, so with equal values every replan started exactly on the JPS blocking
+# boundary and grid rounding made the start cell "blocked" (seen in planner_sim_unknown: no path after 1.8 m).
+# The map is NOT inflated; all clearance comes from these three values.
+checkpoint:                     [0.0, 0.0]
+safeDis:                        1.022
+jps_safe_dis:                   0.872
+finalMinSafeDis:                0.722
+
+# ---------------------------------------------------------------- body / visualisation (simulator)
+length:                         1.0     # m  (assembly x)
+width:                          1.043   # m  (assembly y, incl. thrusters)
+height:                         0.3     # m
+mesh_resource:                  "package://simulator/urdf/ROV_V4.STL"   # metre units, x fwd / y port / z up
+mesh_scale:                     1.0
+mesh_offset_x:                  0.0     # STL origin = hull envelope centre
+mesh_offset_y:                  0.0
+mesh_offset_z:                  0.0
+mesh_roll:                      0.0
+mesh_pitch:                     0.0
+mesh_yaw:                       0.0

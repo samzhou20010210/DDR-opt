@@ -62,6 +62,28 @@ roslaunch plan_manager planner_sim.launch # for robots controlled by linear and 
 
 You can use `2D Nav Goal` to set goal point.  
 
+### Robot model (branch `DDR-test-v1`): ROV V4 by default, original car with `robot:=car`
+All three launch files take `robot:=rov` (default) or `robot:=car`:
+``` bash
+roslaunch plan_manager planner_sim.launch                 # ROV V4
+roslaunch plan_manager planner_sim.launch robot:=car      # original scout_mini car, unchanged
+```
+- **ROV V4** (`ROV_simple_model_V4`, mesh `utils/simulator/urdf/ROV_V4.STL`).
+  - `plan_manager/config/robot_rov.yaml` is loaded on top of the stock configs. It sets the limits, the collision
+    circle and the mesh.
+  - Collision radius 0.722 m (assembly 1.0 × 1.043 m including thrusters). Optimizer target 1.022 m, path search
+    0.872 m, final rejection below 0.722 m.
+  - Limits are placeholders until mass, drag and T500 thrust data exist: 1.0 / −0.3 m/s, 0.4 m/s², 0.8 rad/s.
+  - DDR-opt treats the ROV as a differential-drive robot (surge + yaw). It doesn't use the ROV's sideways (sway)
+    ability.
+- **Environments** for the ROV, which is too large for the car's maps:
+  - `planner_sim`: 30 random boxes instead of 100, default `map_seed` 4. `map_seed:=-1` gives a new random map,
+    with a route in about 40% of seeds.
+  - `planner_nmpc` / `planner_sim_unknown`: `obs5_rov.yaml` (`obs5` minus 2 boxes), start (−7.1, −6.1).
+- Other args: `gui:=false` (no rviz/plotjuggler), `map_seed:=N`.
+- Headless check: `scripts/run_headless_sim.sh --launch planner_sim|planner_nmpc|planner_sim_unknown --robot rov|car`
+  (exit 0 = PASS).
+
 ## Update
 25-12-02
 1. Fixed the bug reported in [Issue 16](https://github.com/ZJU-FAST-Lab/DDR-opt/issues/16). Thanks to JMang0321 for the report!

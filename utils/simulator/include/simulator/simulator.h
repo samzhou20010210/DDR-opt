@@ -100,6 +100,11 @@ class Simulation{
         double ICR_yl_;
         double ICR_xv_;
 
+        // Robot body mesh shown in rviz (defaults = the original scout_mini car)
+        std::string mesh_resource_;
+        double mesh_scale_, mesh_offset_x_, mesh_offset_y_, mesh_offset_z_;
+        double mesh_roll_, mesh_pitch_, mesh_yaw_;
+
     public:
         Simulation(ros::NodeHandle nh){
             nh_ = nh;
@@ -194,6 +199,15 @@ class Simulation{
             Conrtrol_sub_ = nh_.subscribe<carstatemsgs::CarControl>("/simulation/ControlSub",1,&Simulation::ControlSubCallback,this);
 
             PreciseEKFPram_sub_ = nh_.subscribe<geometry_msgs::PointStamped>("/EFFEKF/EKF_ICR",1,&Simulation::EKFPreciseCallback,this);
+
+            nh_.param<std::string>(ros::this_node::getName()+"/mesh_resource", mesh_resource_, "package://simulator/urdf/scout_mini.dae");
+            nh_.param<double>(ros::this_node::getName()+"/mesh_scale", mesh_scale_, 0.000666);
+            nh_.param<double>(ros::this_node::getName()+"/mesh_offset_x", mesh_offset_x_, 0.246);
+            nh_.param<double>(ros::this_node::getName()+"/mesh_offset_y", mesh_offset_y_, 0.21);
+            nh_.param<double>(ros::this_node::getName()+"/mesh_offset_z", mesh_offset_z_, -0.32);
+            nh_.param<double>(ros::this_node::getName()+"/mesh_roll", mesh_roll_, -M_PI / 2.0);
+            nh_.param<double>(ros::this_node::getName()+"/mesh_pitch", mesh_pitch_, M_PI);
+            nh_.param<double>(ros::this_node::getName()+"/mesh_yaw", mesh_yaw_, -3.0 * M_PI / 2.0);
 
             current_time_ = ros::Time::now();
 
@@ -378,15 +392,15 @@ class Simulation{
             marker.header.stamp = ros::Time::now();
 
             // Car body
-            marker.mesh_resource = "package://simulator/urdf/scout_mini.dae";
+            marker.mesh_resource = mesh_resource_;
             // marker.mesh_resource = "package://simulator/urdf/track2.dae";
             // marker.mesh_resource = "package://simulator/urdf/yunjing.dae";
-            offset << 0.246, 0.21; // here -> new  
+            offset << mesh_offset_x_, mesh_offset_y_; // here -> new  
             // offset << -0.05478, -0.15;
             // offset << 0.12, -0.01;
-            marker.scale.x = 0.000666;
-            marker.scale.y = 0.000666;
-            marker.scale.z = 0.000666;
+            marker.scale.x = mesh_scale_;
+            marker.scale.y = mesh_scale_;
+            marker.scale.z = mesh_scale_;
             // marker.scale.x = 0.000666*0.66;
             // marker.scale.y = 0.000666*0.66;
             // marker.scale.z = 0.000666*0.66;
@@ -396,12 +410,12 @@ class Simulation{
             marker.id = 0;
             marker.pose.position.x = (R*offset).x() + current_XYTheta_.x();
             marker.pose.position.y = (R*offset).y() + current_XYTheta_.y();
-            marker.pose.position.z = height_/2-0.32;
+            marker.pose.position.z = height_/2 + mesh_offset_z_;
             marker.color.a = 0.8;
             marker.color.r = 0.3;
             marker.color.g = 0.3;
             marker.color.b = 0.3;
-            tf::Quaternion q = tf::createQuaternionFromRPY(- M_PI / 2.0, M_PI, -3*M_PI/2 + yaw);
+            tf::Quaternion q = tf::createQuaternionFromRPY(mesh_roll_, mesh_pitch_, mesh_yaw_ + yaw);
             // tf::Quaternion q = tf::createQuaternionFromRPY(- M_PI / 2.0, M_PI, yaw);
             // tf::Quaternion q = tf::createQuaternionFromRPY(0, 0, yaw);
             marker.pose.orientation.x = q.x();

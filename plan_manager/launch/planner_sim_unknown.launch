@@ -1,9 +1,18 @@
 <launch> 
+  <!-- Robot model: rov = ROV V4 (default, ROV_simple_model_V4), car = original scout_mini car.
+       rov loads plan_manager/config/robot_rov.yaml on top of the stock configs (limits, collision circle, mesh). -->
+  <arg name="robot" default="rov"/>
+  <!-- Headless support: gui:=false skips rviz and plotjuggler -->
+  <arg name="gui" default="true"/>
+  <!-- Random map seed (Map_input_method 2): -1 = seed from time; fixed value = reproducible map -->
+  <arg name="map_seed" default="-1"/>
+  <!-- obstacle map: rov uses obs5_rov (obs5 minus 2 boxes), car the original obs5 -->
+  <arg name="obs_map" value="$(eval 'obs5_rov' if robot == 'rov' else 'obs5')"/>
   <!-- Whether the start and end points are fixed -->
   <arg name="if_fix_final_" value="false"/> 
   <!-- <arg name="if_fix_final_" value="true"/> -->
-  <arg name="start_x_" value="-9.0"/>
-  <arg name="start_y_" value="-9.0"/>
+  <arg name="start_x_" value="$(eval -7.1 if robot == 'rov' else -9.0)"/>  <!-- rov: nearest spot with >= 1.12 m clearance in obs5 -->
+  <arg name="start_y_" value="$(eval -6.1 if robot == 'rov' else -9.0)"/>
   <arg name="start_yaw_" value="0.0"/>
   <arg name="final_x_" value="3.7"/>
   <arg name="final_y_" value="0.3"/>
@@ -51,6 +60,7 @@
     <rosparam file="$(find plan_manager)/config/car$(arg velocity_suffix).yaml" command="load"/>
     <rosparam file="$(find back_end)/config/global_planning$(arg velocity_suffix).yaml" command="load"/>
     <rosparam file="$(find plan_env)/config/mapsim.yaml" command="load"/>
+    <rosparam if="$(eval robot == 'rov')" file="$(find plan_manager)/config/robot_rov.yaml" command="load"/>
     <param name="start_x" value="$(arg start_x_)"/>
     <param name="start_y" value="$(arg start_y_)"/>
     <param name="start_yaw" value="$(arg start_yaw_)"/>
@@ -90,6 +100,7 @@
 
   <node name="simulator" pkg="simulator" type="simulator" output="screen">
     <rosparam file="$(find plan_manager)/config/car$(arg velocity_suffix).yaml" command="load"/>
+    <rosparam if="$(eval robot == 'rov')" file="$(find plan_manager)/config/robot_rov.yaml" command="load"/>
     <param name="start_x" value="$(arg start_x_)"/>
     <param name="start_y" value="$(arg start_y_)"/>
     <param name="start_yaw" value="$(arg start_yaw_)"/>
@@ -113,6 +124,7 @@
     <node name="mpc" pkg="mpc_controller" type="mpc" output="screen">
       <rosparam file="$(find mpc_controller)/config/mpc$(arg velocity_suffix).yaml" command="load"/>
       <rosparam file="$(find plan_manager)/config/car$(arg velocity_suffix).yaml" command="load"/>
+      <rosparam if="$(eval robot == 'rov')" file="$(find plan_manager)/config/robot_rov.yaml" command="load"/>
       <param name="if_mpc" value="true"/>
       <remap from="~cmd" to="$(arg cmd_topic)"/>
       <remap from="~odom" to="$(arg odom_topic)"/>
@@ -120,7 +132,7 @@
     </node>
   </group>
 
-  <node name="plotjuggler" pkg="plotjuggler" type="plotjuggler" output="screen" args="-l $(find plan_manager)/plotjuggler/plotjuggler.xml"/>
+  <node if="$(arg gui)" name="plotjuggler" pkg="plotjuggler" type="plotjuggler" output="screen" args="-l $(find plan_manager)/plotjuggler/plotjuggler.xml"/>
 
   <node name="global_map_node" pkg="simulator" type="global_map_node" output="screen">
     <!-- Map input method -->
@@ -135,13 +147,14 @@
     <param name="laser_gridmap_interval" value="$(arg gridmap_interval_)"/>
     <!-- Read map parameters from yaml file -->
     <!-- Map file name -->
-    <rosparam file="$(find plan_env)/config/obs5.yaml" command="load"/>
+    <!-- rov: obs5 minus the 2 boxes that boxed in the ROV start (see obs5_rov.yaml header) -->
+    <rosparam file="$(find plan_env)/config/$(arg obs_map).yaml" command="load"/>
     <!-- Random obstacles -->
     <!-- Map file name -->
     <param name="start_x" value="$(arg start_x_)"/>
     <param name="start_y" value="$(arg start_y_)"/>
     <param name="start_yaw" value="$(arg start_yaw_)"/>
-    <param name="srand_num" value="-1"/>
+    <param name="srand_num" value="$(arg map_seed)"/>
     <param name="Random/map_range/x_min" value="-10"/>
     <param name="Random/map_range/x_max" value="10"/>
     <param name="Random/map_range/y_min" value="-10"/>
@@ -207,6 +220,6 @@
 
 
 
-  <node name="rviz" pkg="rviz" type="rviz" args="-d $(find plan_manager)/rviz/planner_sim.rviz" output="log"/>
+  <node if="$(arg gui)" name="rviz" pkg="rviz" type="rviz" args="-d $(find plan_manager)/rviz/planner_sim.rviz" output="log"/>
 
 </launch> 
