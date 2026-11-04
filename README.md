@@ -81,8 +81,10 @@ roslaunch plan_manager planner_sim.launch robot:=car      # original scout_mini 
   - The stock maps (100 boxes, or `obs5` with 65) leave the 1.04 m ROV room in only 19–50% of the map.
   - With this map it fits in about 60% of the map (the car on its stock maps: 52–66%), and every place it fits is
     reachable.
-  - Goals must be at least ~0.9 m from boxes and walls (the ROV's clearance), otherwise the planner reports
-    `Goal dropped` and stays still.
+  - **Goal snapping (ROV):** a goal clicked closer than ~0.97 m to a box or wall is moved to the nearest valid spot
+    within 1.5 m. The terminal shows a yellow warning `Goal (...) ... moved X m to (...)`. Only if no valid spot is
+    that close does the planner report `Goal dropped` and stay still.
+  - Set by `goal_snap_radius` in `robot_rov.yaml`; the car has it off (original behaviour).
   - `map_seed:=-1` gives a new random map.
 - Other args: `gui:=false` (no rviz/plotjuggler), `map_seed:=N`.
 - Headless check: `scripts/run_headless_sim.sh --launch planner_sim|planner_nmpc|planner_sim_unknown --robot rov|car`

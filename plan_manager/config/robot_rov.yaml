@@ -30,6 +30,9 @@ checkpoint:                     [0.0, 0.0]
 safeDis:                        1.022
 jps_safe_dis:                   0.872
 finalMinSafeDis:                0.722
+# A clicked goal closer than jps_safe_dis to an obstacle is moved to the nearest valid spot within this radius
+# (logged as a warning); further away than this the goal is refused as before. 0 = off (original car behaviour).
+goal_snap_radius:               1.5     # m
 
 # ---------------------------------------------------------------- body / visualisation (simulator)
 length:                         1.0     # m  (assembly x)

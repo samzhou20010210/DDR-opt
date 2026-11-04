@@ -71,6 +71,11 @@ class PlanManager
     
     double max_replan_time_;
 
+    // Goal snapping: a goal closer to an obstacle than the path-search clearance (jps_safe_dis) is moved to the
+    // nearest valid spot within goal_snap_radius (0 = off, the original behaviour).
+    double goal_snap_radius_;
+    double jps_safe_dis_;
+
     double predicted_traj_start_time_;
 
     StateMachine state_machine_ = StateMachine::INIT;
@@ -107,6 +112,8 @@ class PlanManager
 
       nh_.param<double>("replan_time",replan_time_,10000.0);
       nh_.param<double>("max_replan_time", max_replan_time_, 1.0);
+      nh_.param<double>("goal_snap_radius", goal_snap_radius_, 0.0);
+      nh_.param<double>("jps_safe_dis", jps_safe_dis_, 0.3);
 
       state_machine_ = StateMachine::IDLE;
 
@@ -165,6 +172,30 @@ class PlanManager
       ROS_INFO("---------------------------------------------------------------");
       ROS_INFO("\n\n\n\n\n\n\n\n");
     
+    }
+
+    // Move goal_state_ out of the obstacle clearance zone if it is inside it (see goal_snap_radius_).
+    void snapGoal(){
+      if(goal_snap_radius_ <= 0.0) return;
+      const double need = jps_safe_dis_ + 0.1;   // + one grid cell, so the goal cell is free for JPS
+      const Eigen::Vector2d goal = goal_state_.head(2);
+      const double d0 = sdfmap_->getDistanceReal(goal);
+      if(d0 >= need) return;
+      for(double r = 0.05; r <= goal_snap_radius_ + 1e-9; r += 0.05){
+        const double dth = std::min(0.05 / r, M_PI / 8.0);
+        for(double th = 0.0; th < 2.0 * M_PI; th += dth){
+          const Eigen::Vector2d p = goal + r * Eigen::Vector2d(cos(th), sin(th));
+          if(!sdfmap_->isInGloMap(p)) continue;
+          if(sdfmap_->getDistanceReal(p) >= need){
+            ROS_WARN("Goal (%.2f, %.2f) is only %.2f m from an obstacle (needs %.2f m): moved %.2f m to (%.2f, %.2f).",
+                     goal.x(), goal.y(), d0, need, r, p.x(), p.y());
+            goal_state_.head(2) = p;
+            return;
+          }
+        }
+      }
+      ROS_WARN("Goal (%.2f, %.2f) is only %.2f m from an obstacle and no valid spot exists within %.2f m.",
+               goal.x(), goal.y(), d0, goal_snap_radius_);
     }
 
     void MainThread(const ros::TimerEvent& event){
@@ -241,6 +272,7 @@ class PlanManager
         ROS_INFO_STREAM("plan_start_state_OAJ: " << plan_start_state_OAJ.transpose());
 
         // front end
+        snapGoal();
         ros::Time astar_start_time = ros::Time::now();
         if(!findJPSRoad()){
           // No front-end path: drop the goal and return to IDLE so a new goal is accepted.
