@@ -202,9 +202,9 @@ scripts/run_headless_gazebo.sh [--no-build] [--goal X Y YAW]                    
   - **Lanes:** 10 lanes of 2.5 m, so 9 lane lines along y at x = 2.5, 5, …, 22.5. They float at the surface in
     blue/white 5 m segments. They are **visual only**: no collision in Gazebo, and not in the planner's map.
   - **Obstacles:** floor-to-surface columns, defined by hand in `pool_scene.yaml`.
-    - Static (orange): s1–s5, pillars and blocks.
-    - Dynamic (red): d1 moves along a lane at 0.2 m/s, d2 moves across the pool at 0.15 m/s, d3 circles a point at
-      0.2 m/s. In Gazebo they are kinematic models moved along their paths in sim time.
+    - Default scene: **16 static** pillars and blocks (orange), s1–s16.
+    - Moving obstacles are supported (red) but none are set right now. In the yaml, `dynamic:` entries with motion
+      `line` or `circle` become kinematic Gazebo models moved along their path in sim time.
   - **What the planner sees:** the walls plus every obstacle at its current position, as a point cloud.
     `laser_simulator` (`dynamic_map: true`, re-reads every cloud) passes it to the planner. The planner's map
     (`if_dynamic_map: true`) clears what the sensor sees again, so a moved obstacle leaves no trail.

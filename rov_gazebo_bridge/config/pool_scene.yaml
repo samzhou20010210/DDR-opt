@@ -26,15 +26,28 @@ lanes:
 # Dynamic obstacles are seen by the planner as their CURRENT position only (DDR-opt has no motion prediction): it
 # replans when one comes close to the remaining trajectory. Keep their speed well below the ROV's (~0.7 m/s).
 obstacles:
+  # 16 static obstacles (2026-11-09: the former moving d1-d3 fixed in place as s6-s8, plus 8 new ones s9-s16).
+  # Layout check: >= 3.1 m between obstacles, >= 2.5 m from the walls, >= 1.9 m from every multigoal.py test goal.
   static:
     - {name: s1_pillar,  shape: cylinder, radius: 0.5,              position: [6.25, 15.0]}
     - {name: s2_block,   shape: box,      size_x: 2.0, size_y: 1.0, position: [17.5, 22.0]}
     - {name: s3_pillar,  shape: cylinder, radius: 0.4,              position: [11.25, 32.0]}
     - {name: s4_wall,    shape: box,      size_x: 1.0, size_y: 3.0, position: [21.0, 33.0]}
     - {name: s5_pillar,  shape: cylinder, radius: 0.6,              position: [4.0, 40.0]}
-  dynamic:
-    - {name: d1_swimmer, shape: cylinder, radius: 0.4, motion: line,   a: [16.25, 10.0], b: [16.25, 40.0], speed: 0.2}
-    - {name: d2_float,   shape: box, size_x: 1.0, size_y: 1.0, motion: line, a: [3.0, 27.0], b: [22.0, 27.0], speed: 0.15}
-    - {name: d3_buoy,    shape: cylinder, radius: 0.3, motion: circle, centre: [19.0, 44.0], radius_path: 2.0, speed: 0.2, phase: 0.0}
+    - {name: s6_pillar,  shape: cylinder, radius: 0.4,              position: [16.25, 18.0]}   # was d1 (moving)
+    - {name: s7_block,   shape: box,      size_x: 1.0, size_y: 1.0, position: [9.0, 27.0]}     # was d2 (moving)
+    - {name: s8_buoy,    shape: cylinder, radius: 0.3,              position: [19.0, 44.0]}    # was d3 (moving)
+    - {name: s9_pillar,  shape: cylinder, radius: 0.5,              position: [10.0, 8.0]}
+    - {name: s10_block,  shape: box,      size_x: 1.0, size_y: 2.0, position: [22.0, 15.0]}
+    - {name: s11_pillar, shape: cylinder, radius: 0.5,              position: [3.0, 30.0]}
+    - {name: s12_block,  shape: box,      size_x: 2.0, size_y: 1.0, position: [13.0, 40.0]}
+    - {name: s13_pillar, shape: cylinder, radius: 0.4,              position: [8.0, 46.0]}
+    - {name: s14_pillar, shape: cylinder, radius: 0.5,              position: [15.0, 30.0]}
+    - {name: s15_block,  shape: box,      size_x: 1.0, size_y: 1.0, position: [8.0, 20.0]}
+    - {name: s16_pillar, shape: cylinder, radius: 0.4,              position: [20.0, 7.0]}
+  # Moving obstacles (none now). Format, for later:
+  #   - {name: d1, shape: cylinder, radius: 0.4, motion: line, a: [x, y], b: [x, y], speed: 0.2}
+  #   - {name: d2, shape: box, size_x: 1.0, size_y: 1.0, motion: circle, centre: [x, y], radius_path: 2.0, speed: 0.2, phase: 0.0}
+  dynamic: []
 
 update_rate: 20.0       # Hz: dynamic obstacle poses (Gazebo) and the obstacle cloud for the planner
