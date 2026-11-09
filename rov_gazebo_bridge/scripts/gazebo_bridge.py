@@ -12,9 +12,17 @@ Out ~odom  (nav_msgs/Odometry, frame "world" = pool corner, child base_link): pl
     /rov_v4/thruster_command (sensor_msgs/JointState, Gazebo names, effort N), matched BY NAME
     tf world -> base_link, static tf world -> gazebo_world
 
-Safety: Gazebo applies the last thruster command forever, so thrust goes to 0 when the allocation stops publishing
-(thrust_timeout) and on shutdown. An emergency stop in DDR-opt only stops the planar motion (the NMPC stops
-commanding, the allocation then commands zero planar wrench) and keeps holding depth.
+Stops (Gazebo applies the last thruster command forever, so "off" means actively sending zeros):
+  SAFETY stop -> all 8 thrusters 0, LATCHED; allocation output is ignored; /safety_stop (latched Bool) tells the
+    planner (drops the goal) and holo_nmpc (stops). Triggers:
+      - manual: /rov_safety/estop (Bool true)
+      - collision risk: /safety_stop true from the planner (robot centre inside an obstacle)
+      - comm loss: no /thruster_allocation/thrust for thrust_timeout, or no ground truth for odom_timeout
+    Re-enable ONLY by manual reset: rosservice call /gazebo_bridge/reset_safety_stop
+  PLANNING stop (/planner/emergency_stop: replan failure, goal dropped) is not handled here: the NMPC stops
+    commanding, the allocation then commands zero planar wrench and keeps holding depth / attitude; the next valid
+    goal resumes.
+  Shutdown of this node -> all 8 thrusters 0.
 """
 import math
 import time
@@ -24,7 +32,8 @@ import tf2_ros
 from geometry_msgs.msg import PoseStamped, TransformStamped, WrenchStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64, Float64MultiArray
+from std_msgs.msg import Bool, Float64, Float64MultiArray
+from std_srvs.srv import Trigger, TriggerResponse
 from carstatemsgs.msg import CarState
 from tf.transformations import euler_from_quaternion, quaternion_from_euler, quaternion_matrix
 
@@ -44,6 +53,10 @@ class Bridge:
             raise RuntimeError("no Gazebo name for DDR-opt thrusters %s" % missing)
         self.gz_names = [self.tmap[n] for n in self.ddr_names]
         self.timeout = g("thrust_timeout", 0.2)
+        self.odom_timeout = g("odom_timeout", 0.5)
+        self.safety = None          # reason of a latched safety stop, None = running
+        self.last_gt = None
+        self.last_zero = 0.0
         d = g("depth")
         a = g("attitude")
         self.depth_target, self.kp, self.ki, self.kd = d["target"], d["kp"], d["ki"], d["kd"]
@@ -60,6 +73,7 @@ class Bridge:
         self.zkm_pub = rospy.Publisher("~zkm", WrenchStamped, queue_size=10)
         self.depth_pub = rospy.Publisher("~depth", Float64, queue_size=10)
         self.cmd_pub = rospy.Publisher("/rov_v4/thruster_command", JointState, queue_size=10)
+        self.safety_pub = rospy.Publisher("/safety_stop", Bool, queue_size=1, latch=True)
         self.tf = tf2_ros.TransformBroadcaster()
         st = tf2_ros.StaticTransformBroadcaster()
         t = TransformStamped()
@@ -72,6 +86,9 @@ class Bridge:
         rospy.Subscriber("/rov_v4/sim_ground_truth", Odometry, self.cb_gt, queue_size=10)
         rospy.Subscriber("/thruster_allocation/thrust", Float64MultiArray, self.cb_thrust, queue_size=10)
         rospy.Subscriber("~depth_target", Float64, lambda m: setattr(self, "depth_target", m.data))
+        rospy.Subscriber("/rov_safety/estop", Bool, lambda m: m.data and self.trip("manual e-stop"))
+        rospy.Subscriber("/safety_stop", Bool, lambda m: m.data and self.trip("collision risk (planner)"))
+        rospy.Service("~reset_safety_stop", Trigger, self.reset)
         rospy.Timer(rospy.Duration(0.02), self.watchdog)
         # Zero the thrusters BEFORE rospy closes its connections. rospy runs its client shutdown hooks (which drop the
         # topic connections) before the pre-shutdown and on_shutdown hooks, so zeros sent from those never reach
@@ -86,6 +103,7 @@ class Bridge:
 
     # ------------------------------------------------------------------ state in
     def cb_gt(self, m):
+        self.last_gt = rospy.get_time()
         q = m.pose.pose.orientation
         roll, pitch, yaw = euler_from_quaternion([q.x, q.y, q.z, q.w])
         R = quaternion_matrix([q.x, q.y, q.z, q.w])[:3, :3]
@@ -136,7 +154,7 @@ class Bridge:
 
     # ------------------------------------------------------------------ thrust out
     def cb_thrust(self, m):
-        if self.closing:
+        if self.closing or self.safety:
             return
         if len(m.data) != len(self.gz_names):
             rospy.logwarn_throttle(1.0, "[gazebo_bridge] %d thrusts for %d thrusters, ignored", len(m.data), len(self.gz_names))
@@ -152,11 +170,39 @@ class Bridge:
         js.effort = [float(e) for e in efforts]
         self.cmd_pub.publish(js)
 
+    # ------------------------------------------------------------------ safety stop
+    def trip(self, reason):
+        if self.closing:
+            return
+        if self.safety is None:
+            self.safety = reason
+            rospy.logerr("[gazebo_bridge] SAFETY STOP (%s): all 8 thrusters 0, latched. Reset: "
+                         "rosservice call /gazebo_bridge/reset_safety_stop", reason)
+            self.safety_pub.publish(Bool(True))
+        self.send([0.0] * len(self.gz_names))
+        self.zero_sent = True
+
+    def reset(self, _req):
+        was = self.safety
+        self.safety = None
+        self.last_thrust = None      # comm-loss check re-arms with the next thrust command
+        self.zero_sent = False
+        self.integ = 0.0
+        self.safety_pub.publish(Bool(False))
+        rospy.logwarn("[gazebo_bridge] safety stop reset (was: %s)", was)
+        return TriggerResponse(success=True, message="reset (was: %s)" % was)
+
     def watchdog(self, _):
-        if self.last_thrust is not None and rospy.get_time() - self.last_thrust > self.timeout and not self.zero_sent:
-            rospy.logwarn("[gazebo_bridge] no thrust command for %.2f s: all thrusters 0", self.timeout)
-            self.send([0.0] * len(self.gz_names))
-            self.zero_sent = True
+        now = rospy.get_time()
+        if self.safety:
+            if now - self.last_zero > 0.5:      # keep re-sending zeros while latched
+                self.send([0.0] * len(self.gz_names))
+                self.last_zero = now
+            return
+        if self.last_thrust is not None and now - self.last_thrust > self.timeout:
+            self.trip("comm loss: no thrust command for %.2f s" % self.timeout)
+        elif self.last_gt is not None and now - self.last_gt > self.odom_timeout:
+            self.trip("comm loss: no ground truth for %.2f s" % self.odom_timeout)
 
     def shutdown(self, reason=""):
         if self.closing:

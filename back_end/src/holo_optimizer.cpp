@@ -67,8 +67,12 @@ HoloPlanner::HoloPlanner(ros::NodeHandle &nh, std::shared_ptr<SDFmap> map) : nh_
 
     // Placeholder dynamics for the allocation-reachability constraint
     param("holo/alloc/enable", alloc_enable_, true);
-    param("holo/alloc/mass", mass_, 60.0);
-    param("holo/alloc/inertia_z", inertia_z_, 6.0);
+    // inertial terms use the EFFECTIVE values (dry mass + added mass); fall back to the plain keys
+    double m_plain, iz_plain;
+    param("holo/alloc/mass", m_plain, 60.0);
+    param("holo/alloc/inertia_z", iz_plain, 6.0);
+    param("holo/alloc/mass_effective", mass_, m_plain);
+    param("holo/alloc/inertia_z_effective", inertia_z_, iz_plain);
     std::vector<double> dr;
     param("holo/alloc/linear_drag", dr, std::vector<double>{60.0, 90.0, 15.0});
     drag_ = Eigen::Vector3d(dr.at(0), dr.at(1), dr.at(2));

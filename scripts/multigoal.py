@@ -177,6 +177,42 @@ def clearance(poses, obst):
     return float(best)
 
 
+def rate_peaks(od, half=0.1):
+    """peak |dvx/dt|, |dvy/dt|, |domega/dt| from the body twist (central difference over +-half s, 0.2 s window)"""
+    if len(od) < 3:
+        return [None] * 3
+    t = np.array([o[0] for o in od])
+    V = np.array([o[1:4] for o in od])
+    out = np.zeros(3)
+    j0 = j1 = 0
+    for i in range(len(t)):
+        while t[j0] < t[i] - half:
+            j0 += 1
+        while j1 + 1 < len(t) and t[j1 + 1] <= t[i] + half:
+            j1 += 1
+        if t[j1] - t[j0] > 1.5 * half:
+            out = np.maximum(out, np.abs((V[j1] - V[j0]) / (t[j1] - t[j0])))
+    return [round(float(x), 3) for x in out]
+
+
+def jitter(th):
+    """max over thrusters of the RMS change between consecutive thrust commands (N)"""
+    if len(th) < 3:
+        return None
+    F = np.array([f[1] for f in th])
+    return round(float(np.sqrt((np.diff(F, axis=0) ** 2).mean(axis=0)).max()), 3)
+
+
+def raw_acc(od):
+    """max body acceleration from 1-step differences (detects high-frequency oscillation)"""
+    if len(od) < 3:
+        return None
+    t = np.array([o[0] for o in od])
+    V = np.array([o[1:3] for o in od])
+    dt = np.maximum(np.diff(t), 1e-3)
+    return round(float((np.linalg.norm(np.diff(V, axis=0), axis=1) / dt).max()), 3)
+
+
 def path_len(pts):
     return float(sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(pts[:-1], pts[1:])))
 
@@ -221,6 +257,18 @@ def main():
     while not R.pose and not rospy.is_shutdown():
         rospy.sleep(0.1)
     rospy.sleep(4.0)  # map build
+
+    hold = None
+    if a.gazebo:   # station keeping before the first goal: oscillation check (added-mass / controller stability)
+        t0h = rospy.get_time()
+        rospy.sleep(10.0)
+        w = lambda L: [s for s in L if s[0] >= t0h]
+        od, th, dp = w(R.odom), w(R.thrust), [d[1] for d in w(R.depth)]
+        sp = [math.hypot(o[1], o[2]) for o in od]
+        hold = {"speed_std": round(float(np.std(sp)), 4) if sp else None, "speed_max": round(max(sp), 4) if sp else None,
+                "thrust_step_rms_N": jitter(th), "raw_acc_max": raw_acc(od),
+                "depth_err_max_m": round(max(abs(d - depth_target) for d in dp), 3) if dp else None}
+        print("[multigoal] hold 10 s: %s" % json.dumps(hold), flush=True)
 
     goals = [tuple(a.goals[i:i + 3]) for i in range(0, len(a.goals) - 2, 3)]
     results = []
@@ -322,6 +370,9 @@ def main():
                 "peak_vx": round(max((o[1] for o in od), default=0), 3),
                 "peak_abs_vy": round(max((abs(o[2]) for o in od), default=0), 3),
                 "peak_abs_w": round(max((abs(o[3]) for o in od), default=0), 3),
+                "peak_rates_dvx_dvy_dw": rate_peaks(od),
+                "thrust_step_rms_N": jitter(th),
+                "raw_acc_max": raw_acc(od),
                 "sway_time_frac": round(sum(1 for o in mv if abs(o[2]) > 0.05) / max(len(mv), 1), 2),
                 "cmd_outside_limits": len(over),
                 "alloc_saturated_frac": round(sum(1 for s in sat if s[1]) / max(len(sat), 1), 4),
@@ -346,7 +397,7 @@ def main():
         results.append(r)
         print(json.dumps(r), flush=True)
     ok = all(r["outcome"] == "REACHED" and r.get("cmd_outside_limits", 0) == 0 for r in results)
-    summary = {"robot": a.robot, "limits_placeholder": lim, "reached": sum(r["outcome"] == "REACHED" for r in results),
+    summary = {"robot": a.robot, "limits_placeholder": lim, "hold": hold, "reached": sum(r["outcome"] == "REACHED" for r in results),
                "goals": len(results), "pass": ok, "results": results}
     if holo:
         nm = [n for n in R.nmpc]

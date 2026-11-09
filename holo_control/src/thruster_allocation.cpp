@@ -52,8 +52,13 @@ public:
         pnh_.getParam("thrusters/axis_z", az);
         pnh_.param("thrusters/f_max", fmax_, 40.0);
         pnh_.param("thrusters/f_min", fmin_, -30.0);
-        pnh_.param("holo/alloc/mass", mass_, 60.0);
-        pnh_.param("holo/alloc/inertia_z", iz_, 6.0);
+        // inertial feed-forward uses the EFFECTIVE values (dry + added mass), scaled by feedforward_scale
+        double m_plain, iz_plain;
+        pnh_.param("holo/alloc/mass", m_plain, 60.0);
+        pnh_.param("holo/alloc/inertia_z", iz_plain, 6.0);
+        pnh_.param("holo/alloc/mass_effective", mass_, m_plain);
+        pnh_.param("holo/alloc/inertia_z_effective", iz_, iz_plain);
+        pnh_.param("feedforward_scale", ff_scale_, 1.0);
         pnh_.param("holo/alloc/linear_drag", dr, std::vector<double>{60.0, 90.0, 15.0});
         pnh_.param("weights", w, std::vector<double>{1.0, 1.0, 1.0, 1.0, 1.0, 1.0});
         pnh_.param("regularisation", eps_, 1e-4);
@@ -86,8 +91,8 @@ public:
         }
         Eigen::FullPivLU<Eigen::MatrixXd> lu(B_);
         ROS_WARN("[allocation] %zu thrusters, B rank %ld, thrust [%.1f, %.1f] N, m %.1f kg, Iz %.1f, drag (%.1f %.1f %.1f) "
-                 "-- ALL PLACEHOLDERS except the layout", n_, long(lu.rank()), fmin_, fmax_, mass_, iz_, drag_(0),
-                 drag_(1), drag_(2));
+                 "-- ALL PLACEHOLDERS except the layout (feed-forward x%.2f)", n_, long(lu.rank()), fmin_, fmax_, mass_,
+                 iz_, drag_(0), drag_(1), drag_(2), ff_scale_);
 
         cmd_sub_ = pnh_.subscribe("cmd", 1, &ThrusterAllocation::cmdCallback, this);
         acc_sub_ = pnh_.subscribe("accel", 1, &ThrusterAllocation::accCallback, this);
@@ -120,7 +125,7 @@ private:
     ros::Publisher thrust_pub_, wdes_pub_, wach_pub_, sat_pub_;
     std::vector<std::string> names_;
     size_t n_ = 0;
-    double fmax_, fmin_, mass_, iz_, eps_, tol_;
+    double fmax_, fmin_, mass_, iz_, eps_, tol_, ff_scale_ = 1.0;
     Eigen::Vector3d drag_, acc_ = Eigen::Vector3d::Zero();
     Eigen::Matrix<double, 6, 1> W_;
     Eigen::MatrixXd B_;
@@ -188,8 +193,9 @@ private:
     void allocate(const Eigen::Vector3d &v)
     {
         Eigen::Matrix<double, 6, 1> tau;
-        tau << mass_ * (acc_(0) - v(2) * v(1)) + drag_(0) * v(0), mass_ * (acc_(1) + v(2) * v(0)) + drag_(1) * v(1),
-            0.0, 0.0, 0.0, iz_ * acc_(2) + drag_(2) * v(2);
+        const double ms = ff_scale_ * mass_, is = ff_scale_ * iz_;
+        tau << ms * (acc_(0) - v(2) * v(1)) + drag_(0) * v(0), ms * (acc_(1) + v(2) * v(0)) + drag_(1) * v(1),
+            0.0, 0.0, 0.0, is * acc_(2) + drag_(2) * v(2);
         const ros::Time now = ros::Time::now();
         if (vfb_enable_)
         {

@@ -158,8 +158,9 @@ Same map, start, collision circle and goal snapping as `rov`, but the ROV uses i
 - **Config**: `plan_manager/config/robot_rov_holo.yaml` (limits, model, weights) and `rov_thrusters.yaml` (layout).
 - **All dynamic numbers are PLACEHOLDERS.**
   - Speeds 1.0 / −0.3 / 0.5 m/s, 0.8 rad/s; accelerations 0.4 / 0.3 m/s², 1.0 rad/s².
-  - Mass 50 kg (set by the user), Iz 6.83 kg m², linear drag 100 / 125 / 80, CoM (−0.064, 0, −0.007), T500 thrust
-    −30 to +40 N (shared with the Gazebo model).
+  - Dry mass 50 kg; effective mass 120 kg and effective Iz 16.4 kg m², both including a 70 kg added-mass
+    placeholder; linear drag 100 / 125 / 80; CoM (−0.064, 0, −0.007); T500 thrust −30 to +40 N.
+  - These are shared with the Gazebo model; see "Physics placeholders" below.
   - Mass, inertia, drag and thrust curves are null in `simulation_parameters.json`. Passing these limits does
     **not** show that the real ROV can fly the trajectory.
 - **Not modelled**: heave, roll and pitch (constant depth assumed), added mass, quadratic drag, currents, the arms.
@@ -174,7 +175,7 @@ The `rov_holo` planner, NMPC and thruster allocation run unchanged on ROV_V4 in 
 ``` bash
 # needs src/uwv-simulator and src/freefloating_gazebo next to DDR-opt-main (not part of this repo)
 DISABLE_ROS1_EOL_WARNINGS=1 roslaunch rov_gazebo_bridge planner_gazebo.launch     # rviz; gui:=true adds gzclient
-scripts/run_headless_gazebo.sh [--no-build] [--goal X Y YAW]                      # 14 goals + thrust-off checks
+scripts/run_headless_gazebo.sh [--no-build] [--goal X Y YAW]                      # hold + 14 goals + stop tests
 ```
 - **Frame:** DDR-opt's `world` is the pool corner. The 25 × 50 m pool is x ∈ [0, 25], y ∈ [0, 50], which is Gazebo's
   world + (12.5, 25). The start (`start_x/y/yaw`, default (5, 5, 0)) and goals are in this frame.
@@ -183,31 +184,67 @@ scripts/run_headless_gazebo.sh [--no-build] [--goal X Y YAW]                    
     same convention as `/simulation/PoseOdomPub`.
   - **Thrust:** `/thruster_allocation/thrust` → `/rov_v4/thruster_command`, matched **by name** through
     `config/bridge.yaml` `thruster_map` (CAD instance → Gazebo name).
-  - **Thrust off:** all 8 thrusters go to 0 when the allocation stops publishing (0.2 s) and on shutdown.
   - **Depth and attitude hold:** a depth PID (1.0 m, `~depth_target`) and a roll/pitch PD, plus a constant
-    correction for the 1% net buoyancy. The resulting heave force and roll/pitch moments go to `~zkm`.
-  - **E-stop:** only stops the planar motion; depth hold continues.
+    −3.92 N (downward) feed-forward that cancels the +3.92 N net buoyancy. The resulting heave force and
+    roll/pitch moments go to `~zkm`.
 - **`thruster_allocation`** in Gazebo mode (`holo_control.launch gazebo:=true`):
   - Heave, roll and pitch are hard equalities at the bridge's targets.
-  - A body-velocity feedback term is added: τ += K (v_cmd − v_meas), K = (150, 150, 40).
+  - A body-velocity feedback term is added: τ += K (v_cmd − v_meas), K = (105, 105, 28).
+  - The inertial feed-forward is scaled by `feedforward_scale` 0.7. Both values are ×0.7 of the nominal ones,
+    chosen to reduce clamping (placeholders).
   - It runs at 50 Hz even without commands.
-  - The 2D mode is unchanged.
+  - The 2D mode is unchanged apart from the effective mass below.
 - **`pool_obstacles`:** the four pool walls as a point cloud, which `laser_simulator` turns into what the planner
   sees. Version 1 is walls only, and the SAUVC props are not spawned. TODO: dynamic obstacles.
-- **Shared estimates** (DDR-opt yaml = `uwv_description/urdf/rov_v4.xacro`; change both together):
 
-  | Parameter | Value |
-  |---|---|
-  | Mass | 50 kg |
-  | Yaw inertia | 6.83 kg m² |
-  | Linear drag (surge, sway, yaw) | 100 / 125 / 80 |
-  | Centre of mass, used for all moments (`thrusters/moment_ref`) | (−0.064, 0, −0.007) |
-  | Thrust | Gazebo clamps at ±40 N; DDR-opt plans within [−30, 40] N |
+#### Stops
+Gazebo keeps applying the last thruster command forever, so "off" always means actively sending zeros.
 
-  - With 100 N/(m/s) surge drag and the 20% reserve, thrust caps steady surge near 0.9 m/s, so the reachability
-    constraint actively limits speed.
-- **Not modelled / TODO:** a real estimator (ground truth is used), added mass, quadratic drag, currents, the arms,
-  and dynamic obstacles. Dynamic feasibility is **not** claimed.
+| | Safety stop | Planning stop |
+|---|---|---|
+| Triggers | collision: the robot centre is inside an obstacle (planner, `/safety_stop`); manual: `rostopic pub /rov_safety/estop std_msgs/Bool true`; comm loss: no allocation output for 0.2 s or no ground truth for 0.5 s | replan failure, goal dropped (`/planner/emergency_stop`) |
+| Effect | **all 8 thrusters 0, latched**; allocation output is ignored; the planner drops the goal; the NMPC stops | planar command stops; **depth and attitude hold continue** |
+| Re-enable | **manual only:** `rosservice call /gazebo_bridge/reset_safety_stop`, then a new goal | the next valid goal |
+
+- Shutting down the bridge also sets all 8 thrusters to 0.
+- `scripts/run_headless_gazebo.sh` tests all five cases after the 14 goals.
+
+#### Physics placeholders
+DDR-opt yaml = `uwv_description/urdf/rov_v4.xacro`; change both together. **All values are placeholders.**
+
+| Parameter | Value | Note |
+|---|---|---|
+| Dry mass `mass_dry` | 50 kg | set by the user; gravity only |
+| Displaced volume | 50.5 L | watertight volume + solid parts. The 153 L of the CAD mesh is the outer envelope; ~102.5 L is free-flooding |
+| Water density | 998 kg/m³ | fresh pool water |
+| Buoyancy | compensation ρV/m = 1.008 → 494.4 N vs 490.5 N weight | net **+3.9 N (0.8%)** |
+| CoB | (−0.064, 0, 0.023) | centroid of the outer envelope. **TODO: CoB must be updated once watertight compartment and foam positions are known.** |
+| CoM, used for all moments (`thrusters/moment_ref`) | (−0.064, 0, −0.007) | |
+| Added mass, surge / sway / heave | 70 / 70 / 80 kg | entrained water + hydrodynamic added mass; inertia only |
+| Added inertia, roll / pitch / yaw | 4.26 / 6.36 / 9.57 kg m² | |
+| `mass_effective` | 120 kg | 50 + 70; feeds the planner's reachability constraint and the allocation feed-forward |
+| `inertia_z_effective` | 16.4 kg m² | 6.83 (solid box) + 9.57; same use |
+| Linear drag, surge / sway / yaw | 100 / 125 / 80 | vec6's arbitrary values scaled by projected area. Real drag is mostly quadratic |
+| Thrust | Gazebo clamps at ±40 N; DDR-opt plans within [−30, 40] N | arbitrary, pending the T500 table at the working voltage |
+
+**Speed and acceleration limits.**
+- **The nominal limits are not reachable at speed.** They are vx ≤ 1.0, |vy| ≤ 0.5, |ω| ≤ 0.8,
+  |v̇x| ≤ 0.4, |v̇y| ≤ 0.3, |ω̇| ≤ 1.0. The planner's thrust-reachability constraint tightens them.
+- **Thrust envelope** within the 20% reserve:
+  - surge: 120·v̇x + 100·vx ≤ 93 N, so 0.4 m/s² is only possible below ~0.45 m/s, and steady surge stays below
+    ~0.93 m/s;
+  - sway: 120·v̇y + 125·vy ≤ 79 N;
+  - yaw: 16.4·ω̇ + 80·ω ≤ 53 N m, so steady |ω| stays below ~0.66 rad/s.
+- **Measured** on the 14-goal run: peaks vx 0.86, |vy| 0.42, |ω| 0.60, |v̇x| 0.40, |v̇y| 0.28, |ω̇| 0.65.
+
+**Depth precision:** ±5 cm today. TODO: approach/docking will need ≤ 2 cm, which needs a better depth controller
+and a real depth sensor and estimator.
+
+**uwv standalone PID controller** (`uwv_control`, `sim_rov4_remote_control`): tuned at 150 kg, not retested at
+50 kg. The DDR-opt path does not use it.
+
+- **Not modelled / TODO:** a real estimator (ground truth is used), quadratic drag, currents, the arms, and dynamic
+  obstacles. Dynamic feasibility is **not** claimed.
 
 ## Update
 25-12-02

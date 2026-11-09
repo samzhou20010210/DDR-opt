@@ -69,7 +69,8 @@ public:
 
         traj_sub_ = pnh_.subscribe("traj", 1, &HoloNmpc::trajCallback, this);
         odom_sub_ = pnh_.subscribe("odom", 1, &HoloNmpc::odomCallback, this);
-        stop_sub_ = nh_.subscribe("/planner/emergency_stop", 1, &HoloNmpc::stopCallback, this);
+        stop_sub_ = nh_.subscribe("/planner/emergency_stop", 1, &HoloNmpc::stopCallback, this);   // planning stop
+        safety_sub_ = nh_.subscribe("/safety_stop", 1, &HoloNmpc::stopCallback, this);            // safety stop
         cmd_pub_ = pnh_.advertise<geometry_msgs::Twist>("cmd", 1);
         accel_pub_ = pnh_.advertise<geometry_msgs::AccelStamped>("accel", 1);
         ref_pub_ = pnh_.advertise<geometry_msgs::Twist>("ref", 1);
@@ -85,7 +86,7 @@ public:
 
 private:
     ros::NodeHandle nh_, pnh_;
-    ros::Subscriber traj_sub_, odom_sub_, stop_sub_;
+    ros::Subscriber traj_sub_, odom_sub_, stop_sub_, safety_sub_;
     ros::Publisher cmd_pub_, accel_pub_, ref_pub_, ref_pose_pub_, path_pub_, stats_pub_;
     ros::Timer timer_;
 

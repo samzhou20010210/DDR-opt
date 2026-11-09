@@ -17,7 +17,9 @@ thruster_map:
   Thruster_T500_V4-7: v_front_star
   Thruster_T500_V4-6: v_rear_port
   Thruster_T500_V4-5: v_rear_star
-thrust_timeout: 0.2          # s without /thruster_allocation/thrust -> all thrusters 0 (Gazebo keeps the last command)
+thrust_timeout: 0.2          # s without /thruster_allocation/thrust -> SAFETY stop (comm loss): all 8 thrusters 0, latched
+odom_timeout:   0.5          # s without /rov_v4/sim_ground_truth  -> SAFETY stop (comm loss)
+                             # (Gazebo keeps the last command forever; reset: rosservice call /gazebo_bridge/reset_safety_stop)
 
 # Depth / attitude hold (DDR-opt plans in the plane only). Outputs the heave force Z and roll / pitch moments K, M
 # (body frame, about the CoM) that thruster_allocation must produce with the vertical thrusters.
@@ -28,7 +30,8 @@ depth:
   kd:         0.0            # N/(m/s)   (heave drag 330 N/(m/s) already damps strongly)
   i_limit:    30.0           # N
   max_force:  100.0          # N
-  buoyancy_ff: -4.905        # N: 1% net buoyancy of the 50 kg model (rov_v4.xacro buoyancy_compensation 1.01)
+  buoyancy_ff: -3.92         # N, DOWNWARD (z up): cancels the +3.92 N net buoyancy = 998 kg/m^3 * 0.0505 m^3 * 9.81
+                             #   - 50 kg * 9.81 = 494.4 - 490.5 N (rov_v4.xacro water_density / displaced_volume / mass)
 attitude:
   kp:         40.0           # N m/rad
   kd:         10.0           # N m/(rad/s)

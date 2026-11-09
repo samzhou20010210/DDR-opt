@@ -52,6 +52,8 @@ class PlanManager
     ros::Publisher cmd_pub_;
     ros::Publisher mpc_polynome_pub_;
     ros::Publisher emergency_stop_pub_;
+    ros::Publisher safety_stop_pub_;
+    ros::Subscriber safety_stop_sub_;
 
     ros::Publisher record_pub_;
 
@@ -104,6 +106,10 @@ class PlanManager
         holo_ = std::make_shared<HoloPlanner>(nh_, sdfmap_);
         nh_.param<bool>("holo/replan_on_collision_only", holo_replan_on_collision_only_, true);
         nh_.param<double>("holo/replan_horizon", holo_replan_horizon_, 3.0);
+        // SAFETY stop (rov_holo): published here on collision, and by rov_gazebo_bridge on manual e-stop / comm loss.
+        // On it the goal is dropped; thrusters stay off until the bridge's manual reset, then a new goal resumes.
+        safety_stop_pub_ = nh_.advertise<std_msgs::Bool>("/safety_stop", 1, true);
+        safety_stop_sub_ = nh_.subscribe<std_msgs::Bool>("/safety_stop", 1, &PlanManager::SafetyStopCallback, this);
       }
 
       goal_sub_ = nh_.subscribe<geometry_msgs::PoseStamped>("/move_base_simple/goal",1,&PlanManager::goal_callback,this);
@@ -166,6 +172,14 @@ class PlanManager
       current_time_ = msg->header.stamp;
     }
 
+
+    void SafetyStopCallback(const std_msgs::Bool::ConstPtr &msg){
+      if(!msg->data) return;
+      if(have_goal_) ROS_ERROR("SAFETY STOP: goal dropped; thrusters off until manual reset "
+                               "(rosservice call /gazebo_bridge/reset_safety_stop), then send a new goal.");
+      state_machine_ = StateMachine::IDLE;
+      have_goal_ = false;
+    }
 
     void goal_callback(const geometry_msgs::PoseStamped::ConstPtr &msg){
       // Ignore the given goal at runtime, commenting out this check may cause unexpected bugs
@@ -236,6 +250,12 @@ class PlanManager
           ROS_INFO_STREAM("current_state_XYTheta_: " << current_state_XYTheta_.transpose());
           ROS_INFO_STREAM("Dis: " << sdfmap_->getDistanceReal(Eigen::Vector2d(current_state_XYTheta_.x(), current_state_XYTheta_.y())));
           ROS_ERROR("EMERGENCY_STOP!!! too close to obstacle!!!");
+          // rov_holo: the robot centre is inside an obstacle -> actual collision -> SAFETY stop (all thrusters off)
+          if(holonomic_){
+            std_msgs::Bool s;
+            s.data = true;
+            safety_stop_pub_.publish(s);
+          }
           return;
         }
       }

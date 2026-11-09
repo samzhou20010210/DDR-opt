@@ -31,8 +31,16 @@ holo:
   alloc:
     enable:       true
     # Same estimates as the Gazebo model (uwv_description/urdf/rov_v4.xacro); change both together.
-    mass:         50.0                  # kg        set by the user (2026-11-08); still an estimate
-    inertia_z:    6.83                  # kg m^2    PLACEHOLDER: solid box 1.0 x 0.8 m, m/12 (1.0^2 + 0.8^2)
+    # Which value feeds what:
+    #   mass_dry            -> weight / buoyancy only (Gazebo link mass; bridge buoyancy_ff). Not used here.
+    #   mass_effective      -> inertial terms: planner reachability constraint AND allocation feed-forward
+    #   inertia_z_effective -> same, yaw
+    mass_dry:            50.0           # kg        set by the user; PLACEHOLDER until weighed
+    mass_effective:      120.0          # kg        50 dry + 70 added (entrained water + added mass, PLACEHOLDER)
+    inertia_z:           6.83           # kg m^2    rigid, PLACEHOLDER: solid box 1.0 x 0.8 m, m/12 (1.0^2 + 0.8^2)
+    inertia_z_effective: 16.4           # kg m^2    6.83 + 9.57 added (70 kg spread like the box), PLACEHOLDER
+    water_density:       998.0          # kg/m^3    fresh pool water
+    displaced_volume:    0.0505         # m^3       PLACEHOLDER (user value): net buoyancy +3.9 N (0.8%)
     linear_drag:  [100.0, 125.0, 80.0]  # N/(m/s), N/(m/s), N m/(rad/s)   PLACEHOLDER (rov_v4.xacro damping)
     reserve:      0.2                   # ARBITRARY: fraction of the thrust range kept free for feedback / disturbances
                                         # (= every horizontal thruster planned within [-23, 33] N instead of [-30, 40]).

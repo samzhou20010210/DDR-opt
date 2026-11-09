@@ -27,6 +27,10 @@
     <remap from="~accel" to="/holo_nmpc/accel"/>
     <param if="$(arg gazebo)" name="zkm_target/enable" value="true"/>
     <param if="$(arg gazebo)" name="velocity_feedback/enable" value="true"/>
+    <!-- velocity-loop gains and inertial feed-forward x0.7 of the nominal 150/150/40 and 1.0 (user decision
+         2026-11-09, to reduce thruster clamping); PLACEHOLDERS -->
+    <rosparam if="$(arg gazebo)" param="velocity_feedback/gains">[105.0, 105.0, 28.0]</rosparam>
+    <param if="$(arg gazebo)" name="feedforward_scale" value="0.7"/>
     <remap if="$(arg gazebo)" from="~zkm" to="$(arg zkm_topic)"/>
     <remap if="$(arg gazebo)" from="~odom" to="$(arg odom_topic)"/>
   </node>
