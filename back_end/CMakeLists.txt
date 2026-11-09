@@ -37,6 +37,7 @@ include_directories(
 
 add_library( back_end 
   src/optimizer.cpp 
+  src/holo_optimizer.cpp
 )
 
 # add_executable(global_planning src/global_planning.cpp)

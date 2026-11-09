@@ -1,0 +1,25 @@
+<launch>
+  <!-- Planar holonomic ROV control stack (included by the plan_manager launch files when robot:=rov_holo):
+       holo_nmpc (trajectory -> body vx, vy, omega on /simulation/HoloCmd) and thruster_allocation
+       (command -> 8 thrusts). State estimation: none yet, the simulator's ground-truth odometry is used directly.
+       TODO(estimation): replace /simulation/PoseOdomPub with a real ROV estimator (e.g. EKF on IMU + DVL/USBL or a
+       pool camera) - the ICR-EKF of the car estimates wheel-slip parameters and is not meaningful for thrusters. -->
+  <arg name="traj_topic" default="/planner/traj_poly"/>
+  <arg name="odom_topic" default="/simulation/PoseOdomPub"/>
+
+  <node name="holo_nmpc" pkg="holo_control" type="holo_nmpc" output="screen">
+    <rosparam file="$(find holo_control)/config/holo_nmpc.yaml" command="load"/>
+    <rosparam file="$(find plan_manager)/config/robot_rov_holo.yaml" command="load"/>
+    <remap from="~traj" to="$(arg traj_topic)"/>
+    <remap from="~odom" to="$(arg odom_topic)"/>
+    <remap from="~cmd" to="/simulation/HoloCmd"/>
+  </node>
+
+  <node name="thruster_allocation" pkg="holo_control" type="thruster_allocation" output="screen">
+    <rosparam file="$(find plan_manager)/config/rov_thrusters.yaml" command="load"/>
+    <rosparam file="$(find plan_manager)/config/robot_rov_holo.yaml" command="load"/>
+    <rosparam file="$(find holo_control)/config/thruster_allocation.yaml" command="load"/>
+    <remap from="~cmd" to="/simulation/HoloCmd"/>
+    <remap from="~accel" to="/holo_nmpc/accel"/>
+  </node>
+</launch>

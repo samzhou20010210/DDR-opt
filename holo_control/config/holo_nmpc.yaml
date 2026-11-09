@@ -1,0 +1,8 @@
+# Holonomic RTI-NMPC (holo_nmpc). Limits come from plan_manager/config/robot_rov_holo.yaml (holo/*, PLACEHOLDERS).
+dt:       0.1                  # s   prediction step
+horizon:  20                   # steps (2 s)
+rate:     50.0                 # Hz  control rate
+Q:        [20.0, 20.0, 10.0]   # x, y, theta tracking
+Qf:       [60.0, 60.0, 30.0]   # terminal step
+R:        [0.5, 0.5, 0.5]      # (vx, vy, omega) - reference body velocity
+Rd:       [5.0, 5.0, 5.0]      # input change between steps

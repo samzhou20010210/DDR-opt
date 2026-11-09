@@ -26,6 +26,7 @@
 
 #include <geometry_msgs/Point.h>
 #include <nav_msgs/Odometry.h>
+#include <geometry_msgs/Twist.h>
 
 class Simulation{
     private:
@@ -54,6 +55,15 @@ class Simulation{
         Eigen::Vector4d current_SVAJ_;
         Eigen::Vector4d current_YOAJ_;
         double current_vy_;
+
+        // Planar holonomic mode (robot:=rov_holo): body-frame command (vx, vy, omega) on /simulation/HoloCmd,
+        // kinematic integration with per-axis acceleration limits (PLACEHOLDERS from robot_rov_holo.yaml).
+        // No hydrodynamics or thruster model: motion follows the command within the limits.
+        bool holonomic_ = false;
+        ros::Subscriber holo_cmd_sub_;
+        Eigen::Vector3d holo_cmd_ = Eigen::Vector3d::Zero();
+        Eigen::Vector3d holo_acc_lim_;
+        Eigen::Vector3d holo_vel_ = Eigen::Vector3d::Zero();   // current body (vx, vy, omega)
 
         double desired_v_;
         double desired_omega_;
@@ -211,7 +221,45 @@ class Simulation{
 
             current_time_ = ros::Time::now();
 
+            nh_.param<bool>(ros::this_node::getName()+"/holonomic", holonomic_, false);
+            if(holonomic_){
+                nh_.param<double>(ros::this_node::getName()+"/holo/max_ax", holo_acc_lim_.x(), 0.4);
+                nh_.param<double>(ros::this_node::getName()+"/holo/max_ay", holo_acc_lim_.y(), 0.3);
+                nh_.param<double>(ros::this_node::getName()+"/holo/max_domega", holo_acc_lim_.z(), 1.0);
+                holo_cmd_sub_ = nh_.subscribe<geometry_msgs::Twist>("/simulation/HoloCmd", 1, &Simulation::HoloCmdCallback, this);
+                ROS_WARN("[simulator] holonomic kinematic mode (body vx, vy, omega on /simulation/HoloCmd)");
+            }
+        }
 
+        void HoloCmdCallback(const geometry_msgs::Twist::ConstPtr &msg){
+            holo_cmd_ << msg->linear.x, msg->linear.y, msg->angular.z;
+            if(if_add_noise_){
+                static std::mt19937 gen(std::random_device{}());
+                for(int k = 0; k < 3; k++){
+                    std::normal_distribution<double> d(0.0, std::fabs(holo_cmd_[k]) * noise_stddev_);
+                    holo_cmd_[k] += d(gen);
+                }
+            }
+            current_time_ = ros::Time::now();
+        }
+
+        void HoloPropagate(){
+            const double dt = State_Propa_rate_;
+            for(int k = 0; k < 3; k++){
+                const double dv = holo_cmd_[k] - holo_vel_[k];
+                const double lim = holo_acc_lim_[k] * dt;
+                holo_vel_[k] += std::max(-lim, std::min(lim, dv));
+            }
+            const double c = cos(current_XYTheta_.z()), s = sin(current_XYTheta_.z());
+            current_XYTheta_.x() += (c * holo_vel_[0] - s * holo_vel_[1]) * dt;
+            current_XYTheta_.y() += (s * holo_vel_[0] + c * holo_vel_[1]) * dt;
+            current_XYTheta_.z() += holo_vel_[2] * dt;
+            // keep the car-state fields meaningful for existing tools (v = surge, omega = yaw rate)
+            current_SVAJ_[1] = holo_vel_[0];
+            current_vy_ = holo_vel_[1];
+            current_YOAJ_[1] = holo_vel_[2];
+            current_SVAJ_[0] += std::hypot(holo_vel_[0], holo_vel_[1]) * dt;
+            current_YOAJ_[0] += holo_vel_[2] * dt;
         }
 
         void PoseSubCallback(const carstatemsgs::CarState::ConstPtr &msg){
@@ -256,6 +304,7 @@ class Simulation{
         }
 
         void StatePropaCallback(const ros::TimerEvent& event){
+            if(holonomic_){ HoloPropagate(); return; }
             
             if(fabs(current_SVAJ_[1] - desired_v_) >= Pose_pub_rate_ * max_a_){
                 current_SVAJ_[1] += Pose_pub_rate_ * max_a_ * (desired_v_ - current_SVAJ_[1])/fabs(desired_v_ - current_SVAJ_[1]);
@@ -311,6 +360,12 @@ class Simulation{
             odom.pose.pose.orientation.y = q.y();
             odom.pose.pose.orientation.z = q.z();
             odom.pose.pose.orientation.w = q.w();
+            if(holonomic_){
+                odom.child_frame_id = "base_link";   // twist in the body frame
+                odom.twist.twist.linear.x = holo_vel_[0];
+                odom.twist.twist.linear.y = holo_vel_[1];
+                odom.twist.twist.angular.z = holo_vel_[2];
+            }
             Pose_odom_pub_.publish(odom);
         }
 

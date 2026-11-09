@@ -1,0 +1,17 @@
+# ROV V4 thruster layout (8 x T500), copied verbatim from ROV_simple_model_V4/thruster_layout.csv.
+# Frame: x forward, y port, z up; origin = hull envelope centre (simulation_parameters.json). Units: m.
+# Columns in CSV order. Horizontal thrusters (axis_z = 0) form the X layout used for planar (X, Y, N);
+# vertical thrusters (axis_z = 1) cover Z, roll and pitch.
+# Used by global_planning (allocation-reachability constraint, horizontal only) and thruster_allocation (all 8).
+thrusters:
+  names:  ["Thruster_T500_V4-4", "Thruster_T500_V4-1", "Thruster_T500_V4-2", "Thruster_T500_V4-6", "Thruster_T500_V4-8", "Thruster_T500_V4-3", "Thruster_T500_V4-5", "Thruster_T500_V4-7"]
+  x:      [0.25, -0.32, -0.32, -0.38, 0.3, 0.25, -0.38, 0.3]
+  y:      [0.345, -0.415, 0.415, 0.26, 0.18, -0.345, -0.26, -0.18]
+  z:      [0.045, 0.045, 0.045, 0.045, 0.045, 0.045, 0.045, 0.045]
+  axis_x: [0.7071067811865476, 0.7071067811865476, 0.7071067811865476, 0.0, 0.0, 0.7071067811865476, 0.0, 0.0]
+  axis_y: [-0.7071067811865476, -0.7071067811865476, 0.7071067811865476, 0.0, 0.0, 0.7071067811865476, 0.0, 0.0]
+  axis_z: [0.0, 0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0]
+  # PLACEHOLDER thrust limits per thruster (N): thruster_forward_reverse_curves is null in simulation_parameters.json.
+  # Replace with the T500 curve at the working voltage (also null) once known.
+  f_max:  40.0
+  f_min:  -30.0

@@ -1,0 +1,5 @@
+# Thruster allocation QP (thruster_allocation). Layout: plan_manager/config/rov_thrusters.yaml (exact, from the CAD
+# export); thrust limits and the M / D model: PLACEHOLDERS (rov_thrusters.yaml f_max/f_min, robot_rov_holo.yaml holo/alloc).
+weights:               [1.0, 1.0, 1.0, 10.0, 10.0, 1.0]   # X, Y, Z, K (roll), M (pitch), N: keep roll/pitch moments at 0
+regularisation:        1.0e-4                            # thrust-effort term
+saturation_tolerance:  0.5                               # |B f - tau| above this = request not reachable (N, N m)

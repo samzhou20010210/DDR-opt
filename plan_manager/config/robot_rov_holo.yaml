@@ -1,0 +1,60 @@
+# ROV V4, planar holonomic mode (robot:=rov_holo). Loaded AFTER robot_rov.yaml (which still provides the collision
+# circle, JPS clearance, goal snapping and mesh) and rov_thrusters.yaml, inside global_planning, simulator,
+# holo_nmpc and thruster_allocation.
+#
+# Model: pose (x, y, theta); body velocities (vx surge, vy sway, omega yaw rate) are independent.
+#   xdot = vx cos(theta) - vy sin(theta),  ydot = vx sin(theta) + vy cos(theta),  thetadot = omega
+# Heave / roll / pitch are not planned (constant depth, level attitude assumed; no depth controller yet).
+#
+# !!! Every dynamic number below is a PLACEHOLDER (assumption). mass_kg, inertia_kg_m2, added_mass_matrix,
+# !!! linear_drag, quadratic_drag and thruster_forward_reverse_curves are all null in simulation_parameters.json.
+# !!! Trajectories that satisfy these limits are NOT shown to be dynamically feasible for the real ROV.
+
+holonomic: true          # global_planning -> HoloPlanner; simulator -> holonomic kinematics
+
+holo:
+  # ---------------------------------------------------------------- independent kinematic limits (PLACEHOLDERS)
+  max_vx:       1.0      # m/s     surge forward
+  min_vx:       -0.3     # m/s     surge reverse (propellers weaker in reverse)
+  max_vy:       0.5      # m/s     |sway|
+  max_omega:    0.8      # rad/s   |yaw rate|
+  max_ax:       0.4      # m/s^2   |d vx / dt|   body-velocity rates, the same quantities the planner, holo_nmpc
+  max_ay:       0.3      # m/s^2   |d vy / dt|   (rate limits) and the simulator (acceleration limits) bound
+  max_domega:   1.0      # rad/s^2 |d omega / dt|
+  # All of the above are read unchanged by global_planning, holo_nmpc and simulator from this file.
+
+  # ---------------------------------------------------------------- allocation reachability (PLACEHOLDER dynamics)
+  # Planar wrench needed: (X, Y) = m R^T pddot + D v_b (= m (vdot_b + omega S v_b) + D v_b), N = Iz omegadot + d_r omega
+  # (no added mass or quadratic drag). It must lie inside {B f : f_min <= f <= f_max} of the 4 horizontal thrusters,
+  # written as 12 facet inequalities n_k . tau <= h_k (exact: check_allocation.py compares them with a per-thruster
+  # feasibility test). The vertical thrusters can always cancel the roll / pitch of the horizontal ones.
+  alloc:
+    enable:       true
+    mass:         60.0                  # kg        PLACEHOLDER
+    inertia_z:    6.0                   # kg m^2    PLACEHOLDER
+    linear_drag:  [60.0, 90.0, 15.0]    # N/(m/s), N/(m/s), N m/(rad/s)   PLACEHOLDER
+    reserve:      0.2                   # ARBITRARY: fraction of the thrust range kept free for feedback / disturbances
+                                        # (= every horizontal thruster planned within [-23, 33] N instead of [-30, 40]).
+                                        # Not derived from any disturbance or current model; revisit with real data.
+
+  # ---------------------------------------------------------------- optimizer (penalty weights, same scale as DDR-opt)
+  energy_weights: [1.0, 1.0, 0.3]       # jerk energy weights for x, y, theta
+  weights:
+    time:       50
+    vel:        300
+    omega:      300
+    acc:        300
+    domega:     300
+    alloc:      300
+    collision:  500000
+    mean_time:  300
+  replan_on_collision_only: true        # periodic replans (unknown space) only when the rest of the trajectory
+                                        # comes closer than jps_safe_dis to the updated map; false = every replan_time
+  replan_horizon:  3.0                  # s: a partial (cut) trajectory is extended when less than this remains
+  limit_margin:    0.05                 # penalties target 95% of every limit (and 0.05 of the thrust range inside the
+                                        # reserve), so the soft-penalty optimum lands below the real limit
+  limit_tolerance: 0.0                  # verification (every 0.01 s): a plan exceeding ANY limit at all is re-optimized
+                                        # with 10x limit weights ...
+  max_attempts:    6                    # ... at most this often (~1-50 ms each); still failing -> see README
+  piece_length:   0.6                   # m, initial-guess spacing of the waypoints along the JPS path
+  gradient_check: false                 # true: finite-difference check of the analytic gradient on every plan (debug, slow)

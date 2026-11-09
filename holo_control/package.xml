@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>holo_control</name>
+  <version>0.0.0</version>
+  <description>Planar holonomic ROV control for DDR-opt (robot:=rov_holo): holonomic NMPC (body vx, vy, omega) and
+    8-thruster allocation QP. Dynamic parameters are placeholders.</description>
+  <maintainer email="samzhou20010210@gmail.com">sam</maintainer>
+  <license>TODO</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>roscpp</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>carstatemsgs</depend>
+  <depend>back_end</depend>
+</package>

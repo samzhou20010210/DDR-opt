@@ -1,6 +1,9 @@
 <launch> 
   <!-- Robot model: rov = ROV V4 (default, ROV_simple_model_V4), car = original scout_mini car.
        rov loads plan_manager/config/robot_rov.yaml on top of the stock configs (limits, collision circle, mesh). -->
+  <!-- rov_holo = ROV V4 as a planar holonomic vehicle (independent vx, vy, omega): HoloPlanner + holo_nmpc +
+       thruster_allocation (holo_control), no ICR-EKF; also loads rov_thrusters.yaml and robot_rov_holo.yaml
+       (all dynamic values PLACEHOLDERS). rov / car are unchanged. -->
   <arg name="robot" default="rov"/>
   <!-- Headless support: gui:=false skips rviz and plotjuggler -->
   <arg name="gui" default="true"/>
@@ -8,12 +11,12 @@
   <!-- ROV environment (all three launch files): 20 random 1 m boxes, seed 10, start (-7.75, -0.5).
        Sized so the 1.04 m ROV fits in ~60% of the map (car on its stock maps: 52-66%) and every place it fits
        is reachable from the start; the stock maps leave the ROV only 19-50% fit area. map_seed:=-1 = new random map. -->
-  <arg name="map_seed" default="$(eval 10 if robot == 'rov' else -1)"/>
+  <arg name="map_seed" default="$(eval 10 if robot != 'car' else -1)"/>
   <!-- Whether the start and end points are fixed -->
   <arg name="if_fix_final_" value="false"/> 
   <!-- <arg name="if_fix_final_" value="true"/> -->
-  <arg name="start_x_" value="$(eval -7.75 if robot == 'rov' else -9.0)"/>
-  <arg name="start_y_" value="$(eval -0.5 if robot == 'rov' else -9.0)"/>
+  <arg name="start_x_" value="$(eval -7.75 if robot != 'car' else -9.0)"/>
+  <arg name="start_y_" value="$(eval -0.5 if robot != 'car' else -9.0)"/>
   <arg name="start_yaw_" value="0.0"/>
   <arg name="final_x_" value="3.7"/>
   <arg name="final_y_" value="0.3"/>
@@ -22,7 +25,7 @@
   <!-- Map resolution -->
   <arg name="gridmap_interval_" value="0.1"/> 
 
-  <arg name="odom_topic" value="/ICREKF/EKF_XYTheta" />
+  <arg name="odom_topic" value="$(eval '/simulation/PoseOdomPub' if robot == 'rov_holo' else '/ICREKF/EKF_XYTheta')"/>
   <arg name="traj_topic" value="/planner/traj_poly" />
   <arg name="cmd_topic" value="/simulation/PoseSub" />
 
@@ -61,7 +64,9 @@
     <rosparam file="$(find plan_manager)/config/car$(arg velocity_suffix).yaml" command="load"/>
     <rosparam file="$(find back_end)/config/global_planning$(arg velocity_suffix).yaml" command="load"/>
     <rosparam file="$(find plan_env)/config/mapsim.yaml" command="load"/>
-    <rosparam if="$(eval robot == 'rov')" file="$(find plan_manager)/config/robot_rov.yaml" command="load"/>
+    <rosparam if="$(eval robot != 'car')" file="$(find plan_manager)/config/robot_rov.yaml" command="load"/>
+    <rosparam if="$(eval robot == 'rov_holo')" file="$(find plan_manager)/config/rov_thrusters.yaml" command="load"/>
+    <rosparam if="$(eval robot == 'rov_holo')" file="$(find plan_manager)/config/robot_rov_holo.yaml" command="load"/>
     <param name="start_x" value="$(arg start_x_)"/>
     <param name="start_y" value="$(arg start_y_)"/>
     <param name="start_yaw" value="$(arg start_yaw_)"/>
@@ -101,7 +106,9 @@
 
   <node name="simulator" pkg="simulator" type="simulator" output="screen">
     <rosparam file="$(find plan_manager)/config/car$(arg velocity_suffix).yaml" command="load"/>
-    <rosparam if="$(eval robot == 'rov')" file="$(find plan_manager)/config/robot_rov.yaml" command="load"/>
+    <rosparam if="$(eval robot != 'car')" file="$(find plan_manager)/config/robot_rov.yaml" command="load"/>
+    <rosparam if="$(eval robot == 'rov_holo')" file="$(find plan_manager)/config/rov_thrusters.yaml" command="load"/>
+    <rosparam if="$(eval robot == 'rov_holo')" file="$(find plan_manager)/config/robot_rov_holo.yaml" command="load"/>
     <param name="start_x" value="$(arg start_x_)"/>
     <param name="start_y" value="$(arg start_y_)"/>
     <param name="start_yaw" value="$(arg start_yaw_)"/>
@@ -109,7 +116,7 @@
     <param name="noise_stddev" value="0.01"/>
     <param name="State_Propa_rate" value="500"/>
     <param name="Pose_pub_rate" value="100"/>
-    <param name="Pose_odom_pub_rate" value="10"/>
+    <param name="Pose_odom_pub_rate" value="$(eval 100 if robot == 'rov_holo' else 10)"/>
     <param name="detection_range" value="$(arg detection_range_)"/>
     <param name="hrz_limited" value="$(arg hrz_limited_)"/>
     <param name="hrz_laser_range_dgr" value="$(arg hrz_laser_range_dgr_)"/>
@@ -122,15 +129,19 @@
   </node>
 
   <group if="$(arg if_move_)">
-    <node name="mpc" pkg="mpc_controller" type="mpc" output="screen">
+    <node unless="$(eval robot == 'rov_holo')" name="mpc" pkg="mpc_controller" type="mpc" output="screen">
       <rosparam file="$(find mpc_controller)/config/mpc$(arg velocity_suffix).yaml" command="load"/>
       <rosparam file="$(find plan_manager)/config/car$(arg velocity_suffix).yaml" command="load"/>
-      <rosparam if="$(eval robot == 'rov')" file="$(find plan_manager)/config/robot_rov.yaml" command="load"/>
+      <rosparam if="$(eval robot != 'car')" file="$(find plan_manager)/config/robot_rov.yaml" command="load"/>
       <param name="if_mpc" value="true"/>
       <remap from="~cmd" to="$(arg cmd_topic)"/>
       <remap from="~odom" to="$(arg odom_topic)"/>
       <remap from="~traj" to="$(arg traj_topic)"/>
     </node>
+    <include if="$(eval robot == 'rov_holo')" file="$(find holo_control)/launch/holo_control.launch">
+      <arg name="traj_topic" value="$(arg traj_topic)"/>
+      <arg name="odom_topic" value="$(arg odom_topic)"/>
+    </include>
   </group>
 
   <node if="$(arg gui)" name="plotjuggler" pkg="plotjuggler" type="plotjuggler" output="screen" args="-l $(find plan_manager)/plotjuggler/plotjuggler.xml"/>
@@ -140,7 +151,7 @@
     <!-- 1: Read map from yaml file -->
     <!-- 2: Random obstacles -->
     <!-- 3: Get obstacles from png -->
-    <param name="Map_input_method" value="$(eval 2 if robot == 'rov' else 1)"/>  <!-- rov: random, car: obs5 -->
+    <param name="Map_input_method" value="$(eval 2 if robot != 'car' else 1)"/>  <!-- rov: random, car: obs5 -->
     <param name="if_boundary_wall" value="true"/>
     <!-- gridmap cell size -->
     <param name="gridmap_interval" value="$(arg gridmap_interval_)"/>
@@ -160,9 +171,9 @@
     <param name="Random/map_range/y_min" value="-10"/>
     <param name="Random/map_range/y_max" value="10"/>
     <!-- Square obstacles -->
-    <param name="Random/obstacle_box/num" value="$(eval 20 if robot == 'rov' else 80)"/>
-    <param name="Random/obstacle_box/length" value="$(eval 1.0 if robot == 'rov' else 0.8)"/>
-    <param name="Random/obstacle_box/safe_dis" value="$(eval 3.0 if robot == 'rov' else 2.0)"/>
+    <param name="Random/obstacle_box/num" value="$(eval 20 if robot != 'car' else 80)"/>
+    <param name="Random/obstacle_box/length" value="$(eval 1.0 if robot != 'car' else 0.8)"/>
+    <param name="Random/obstacle_box/safe_dis" value="$(eval 3.0 if robot != 'car' else 2.0)"/>
     <!-- Get obstacles from png -->
     <param name="Png/file_path" value="$(find plan_env)/config/obs.png"/>
     <param name="Png/x_lower" value="-5.0"/>
@@ -188,7 +199,7 @@
   </group>
 
 
-  <node name="icrekf" pkg="icrekf" type="icrekf" output="screen">
+  <node unless="$(eval robot == 'rov_holo')" name="icrekf" pkg="icrekf" type="icrekf" output="screen">
     <param name="Pose_sub_Reduce_frequency_" value="0"/>
     <param name="state_pub_frequency" value="100.0"/>
     <param name="Q_x" value="0.5"/>

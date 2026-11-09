@@ -87,8 +87,84 @@ roslaunch plan_manager planner_sim.launch robot:=car      # original scout_mini 
   - Set by `goal_snap_radius` in `robot_rov.yaml`; the car has it off (original behaviour).
   - `map_seed:=-1` gives a new random map.
 - Other args: `gui:=false` (no rviz/plotjuggler), `map_seed:=N`.
-- Headless check: `scripts/run_headless_sim.sh --launch planner_sim|planner_nmpc|planner_sim_unknown --robot rov|car`
-  (exit 0 = PASS).
+- Headless check: `scripts/run_headless_sim.sh --launch planner_sim|planner_nmpc|planner_sim_unknown --robot rov|car|rov_holo`
+  (exit 0 = PASS). `rov_holo`, or `--multigoal` with `rov` / `car`, runs `scripts/multigoal.py`: 14 goals across the
+  map, with path length, time, clearance and tracking per goal in `multigoal.json`.
+
+### ROV as a planar holonomic vehicle: `robot:=rov_holo`
+``` bash
+roslaunch plan_manager planner_sim.launch robot:=rov_holo     # also planner_nmpc / planner_sim_unknown
+```
+Same map, start, collision circle and goal snapping as `rov`, but the ROV uses its sway:
+- **Planner** (`back_end/.../holo_optimizer.h`, `HoloPlanner`).
+  - The flat output is the pose (x, y, θ), one MINCO minimum-jerk polynomial per axis (`gcopter/minco_holo.hpp`).
+  - Body velocities come straight from it: vx = cos θ ẋ + sin θ ẏ, vy = −sin θ ẋ + cos θ ẏ, ω = θ̇. There's no
+    (yaw, arc-length) integration, ICR slip or wheel coupling.
+  - Reused from DDR-opt: JPS front end and its (x, y, yaw) samples as the initial guess, L-BFGS, the
+    virtual-time map and the smoothed-L1 penalties.
+  - Penalties:
+    - independent vx / vy / ω limits;
+    - the body-velocity rates d(vx)/dt, d(vy)/dt, dω/dt (= R^T p̈ − ω S v_b). The NMPC rate limits and the simulator
+      bound the same quantities with the same yaml values;
+    - ESDF clearance;
+    - thruster reachability.
+  - Thruster reachability:
+    - The planar wrench m R^T p̈ + D v_b, N = Iz ω̇ + d_r ω must satisfy the 12 facet inequalities n_k · τ ≤ h_k of
+      the zonotope {B_h f : f_min ≤ f ≤ f_max} of the 4 horizontal thrusters.
+    - This matches an exact per-thruster feasibility test with zero mismatches on random wrenches; see
+      `holo_control/scripts/check_allocation.py`.
+    - Heave, roll and pitch are not part of it, because the vertical thrusters can always cancel them (at most
+      ~5.5 N per vertical thruster).
+  - The `reserve` (0.2) is **arbitrary**. It is not derived from any disturbance model, and it is equivalent to
+    planning every horizontal thruster within [−23, 33] N instead of [−30, 40] N.
+  - Start and goal are hard boundary conditions of the MINCO polynomial (not penalties), so the PHR-ALM endpoint
+    constraint DDR-opt needs is not used. The planner logs the residual (`endpoint error`, ~1e-15).
+  - Initial guess: the JPS path geometry resampled by arc length, heading along the path, timed from the surge
+    limits. The diff-drive "rotate then drive" timing is not used.
+  - Limits are soft penalties. The penalties aim at 95% of each limit (`limit_margin`), and every result is checked
+    every 0.01 s against the limits themselves with zero tolerance (`limit_tolerance: 0.0`).
+    - Any excess: the limit weights are multiplied by 10 and the next attempt re-optimizes, warm-started from the
+      previous solution (up to 6 attempts).
+    - After the last attempt, if the start is at rest, the same path is slowed uniformly in time (up to 4×) until
+      it complies. Clearance and boundary conditions are unchanged. This is needed when the escalation stalls near
+      walls, where the collision and limit penalties pull against each other.
+    - A plan that still fails is not published. During a replan the ROV keeps executing its current (verified)
+      trajectory while the rest of it stays clear of the updated map, and the next replan cycle tries again.
+      Otherwise the goal is dropped and the ROV stops (`Holonomic optimizer failed! Goal dropped`).
+  - Unknown space: the ROV keeps its current trajectory and replans only when the updated map brings it within the
+    path-search clearance, or when a partial trajectory has less than 3 s left. Replanning every 0.08 s made it
+    dither between routes.
+  - If the start is already within the path-search clearance, the path search starts from the nearest free spot
+    within 1 m, and the optimizer may plan a way out.
+- **Trajectory message**: `Polynome.model = HOLONOMIC`, vectors carry (x, y, θ).
+- **Controller** `holo_control/holo_nmpc`.
+  - Real-time-iteration NMPC on the holonomic kinematics, solved with OSQP. ACADO is not installed here, so the
+    car's ACADO NMPC could not be regenerated; it is unchanged.
+  - Output: body (vx, vy, ω) on `/simulation/HoloCmd`. Input boxes and rate limits apply.
+  - Horizon 20 × 0.1 s (prediction = control horizon, 2 s); one QP per 50 Hz cycle.
+  - `/holo_nmpc/stats` publishes [cycle ms, OSQP solve ms, OSQP iterations, ok, timer period ms].
+  - `/holo_nmpc/ref_pose` publishes the reference pose at the current time.
+- **Allocation** `holo_control/thruster_allocation`.
+  - QP over all 8 thrusters (B is 6×8, rank 6):
+    min ½‖B_p f − τ_p‖²_W + ½ε‖f‖² s.t. Z = K = M = 0 (hard equalities), f_min ≤ f ≤ f_max.
+  - τ_p = (m(v̇x − ω vy) + d_u vx, m(v̇y + ω vx) + d_v vy, Iz ω̇ + d_r ω), the same wrench the planner bounds.
+  - If the equalities are infeasible, it falls back to 6-axis weighted least squares and reports `saturated`.
+    This can't happen with the current placeholders, but could once real buoyancy or CoM offsets are added.
+  - Publishes `/thruster_allocation/thrust` (CSV order), the desired and achieved wrench, and `saturated`.
+  - The kinematic simulator does **not** use the thrusts.
+- **Simulator**: holonomic kinematics with per-axis acceleration limits.
+- **State estimation**: no ICR-EKF (it estimates wheel slip). The planner and NMPC use the simulator's
+  ground-truth odometry. TODO: a real ROV estimator.
+- **Config**: `plan_manager/config/robot_rov_holo.yaml` (limits, model, weights) and `rov_thrusters.yaml` (layout).
+- **All dynamic numbers are PLACEHOLDERS.**
+  - Speeds 1.0 / −0.3 / 0.5 m/s, 0.8 rad/s; accelerations 0.4 / 0.3 m/s², 1.0 rad/s².
+  - Mass 60 kg, Iz 6 kg m², linear drag, T500 thrust −30 to +40 N.
+  - Mass, inertia, drag and thrust curves are null in `simulation_parameters.json`. Passing these limits does
+    **not** show that the real ROV can fly the trajectory.
+- **Not modelled**: heave, roll and pitch (constant depth assumed), added mass, quadratic drag, currents, the arms.
+  Z = 0 assumes neutral buoyancy, and moments are about the hull-envelope centre (CoM unknown).
+- **Debug**: `rosparam set /global_planning/holo/gradient_check true` makes every plan compare the analytic
+  gradient with finite differences.
 
 ## Update
 25-12-02

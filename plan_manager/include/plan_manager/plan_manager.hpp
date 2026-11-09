@@ -6,6 +6,7 @@
 #include "front_end/jps_planner/jps_planner.h"
 #include "geometry_msgs/PoseStamped.h"
 #include "back_end/optimizer.h"
+#include "back_end/holo_optimizer.h"
 #include "tf/tf.h"
 #include "tf/transform_datatypes.h"
 #include "carstatemsgs/CarState.h"
@@ -33,6 +34,16 @@ class PlanManager
     std::shared_ptr<Visualizer> visualizer_;
     std::shared_ptr<MSPlanner> msplanner_;
     std::shared_ptr<JPS::JPSPlanner> jps_planner_;
+
+    // Planar holonomic ROV mode (robot:=rov_holo, param "holonomic"). false = original DDR-opt path, unchanged.
+    bool holonomic_ = false;
+    std::shared_ptr<HoloPlanner> holo_;
+    HoloPlanner::PVA holo_head_;   // world pose / velocity / acceleration at the plan start
+    // Commit to the current trajectory: a periodic replan only happens if the rest of it comes closer than the
+    // path-search clearance to the (updated) map. Replanning every replan_time from scratch made the ROV dither
+    // between routes around obstacles in unknown space.
+    bool holo_replan_on_collision_only_ = true;
+    double holo_replan_horizon_ = 3.0;
 
 
     ros::Subscriber goal_sub_;
@@ -88,6 +99,12 @@ class PlanManager
       visualizer_ = std::make_shared<Visualizer>(nh);
       msplanner_ = std::make_shared<MSPlanner>(Config(ros::NodeHandle("~")), nh_, sdfmap_);
       jps_planner_ = std::make_shared<JPS::JPSPlanner>(sdfmap_, nh_);
+      nh_.param<bool>("holonomic", holonomic_, false);
+      if(holonomic_){
+        holo_ = std::make_shared<HoloPlanner>(nh_, sdfmap_);
+        nh_.param<bool>("holo/replan_on_collision_only", holo_replan_on_collision_only_, true);
+        nh_.param<double>("holo/replan_horizon", holo_replan_horizon_, 3.0);
+      }
 
       goal_sub_ = nh_.subscribe<geometry_msgs::PoseStamped>("/move_base_simple/goal",1,&PlanManager::goal_callback,this);
       // current_state_sub_ = nh_.subscribe<carstatemsgs::CarState>("/simulation/PosePub",1,&PlanManager::GeometryCallback,this);
@@ -174,6 +191,19 @@ class PlanManager
     
     }
 
+    // Nearest point within `radius` of p whose obstacle distance is at least `need` (rings of 5 cm).
+    bool nearestFree(const Eigen::Vector2d &p0, double need, double radius, Eigen::Vector2d &out, double &moved){
+      for(double r = 0.05; r <= radius + 1e-9; r += 0.05){
+        const double dth = std::min(0.05 / r, M_PI / 8.0);
+        for(double th = 0.0; th < 2.0 * M_PI; th += dth){
+          const Eigen::Vector2d p = p0 + r * Eigen::Vector2d(cos(th), sin(th));
+          if(!sdfmap_->isInGloMap(p)) continue;
+          if(sdfmap_->getDistanceReal(p) >= need){ out = p; moved = r; return true; }
+        }
+      }
+      return false;
+    }
+
     // Move goal_state_ out of the obstacle clearance zone if it is inside it (see goal_snap_radius_).
     void snapGoal(){
       if(goal_snap_radius_ <= 0.0) return;
@@ -181,18 +211,12 @@ class PlanManager
       const Eigen::Vector2d goal = goal_state_.head(2);
       const double d0 = sdfmap_->getDistanceReal(goal);
       if(d0 >= need) return;
-      for(double r = 0.05; r <= goal_snap_radius_ + 1e-9; r += 0.05){
-        const double dth = std::min(0.05 / r, M_PI / 8.0);
-        for(double th = 0.0; th < 2.0 * M_PI; th += dth){
-          const Eigen::Vector2d p = goal + r * Eigen::Vector2d(cos(th), sin(th));
-          if(!sdfmap_->isInGloMap(p)) continue;
-          if(sdfmap_->getDistanceReal(p) >= need){
-            ROS_WARN("Goal (%.2f, %.2f) is only %.2f m from an obstacle (needs %.2f m): moved %.2f m to (%.2f, %.2f).",
-                     goal.x(), goal.y(), d0, need, r, p.x(), p.y());
-            goal_state_.head(2) = p;
-            return;
-          }
-        }
+      Eigen::Vector2d p; double r;
+      if(nearestFree(goal, need, goal_snap_radius_, p, r)){
+        ROS_WARN("Goal (%.2f, %.2f) is only %.2f m from an obstacle (needs %.2f m): moved %.2f m to (%.2f, %.2f).",
+                 goal.x(), goal.y(), d0, need, r, p.x(), p.y());
+        goal_state_.head(2) = p;
+        return;
       }
       ROS_WARN("Goal (%.2f, %.2f) is only %.2f m from an obstacle and no valid spot exists within %.2f m.",
                goal.x(), goal.y(), d0, goal_snap_radius_);
@@ -229,20 +253,40 @@ class PlanManager
           plan_start_state_XYTheta = current_state_XYTheta_;
           plan_start_state_VAJ = current_state_VAJ_;
           plan_start_state_OAJ = current_state_OAJ_;
+          holo_head_.setZero();
+          holo_head_.col(0) = current_state_XYTheta_;
         } 
         // Use predicted distance for replanning in planning state
         else if(state_machine_ == StateMachine::PLANNING || state_machine_ == StateMachine::REPLAN){
           
           if(((current_state_XYTheta_ - goal_state_).head(2).squaredNorm() + fmod(fabs((plan_start_state_XYTheta - goal_state_)[2]), 2.0 * M_PI)*0.02 < 1.0) ||
-             msplanner_->final_traj_.getTotalDuration() < max_replan_time_){
+             trajDuration() < max_replan_time_){
             state_machine_ = StateMachine::GOINGTOGOAL;
             return;
+          }
+
+          if(holonomic_ && holo_replan_on_collision_only_){
+            const double t_now = current - plan_start_time_;
+            const bool reaches_goal = (holo_->tail_.col(0).head(2) - goal_state_.head(2)).norm() < 0.1;
+            const bool clear = holo_->remainingClearance(t_now) >= jps_safe_dis_;
+            // keep the current trajectory while it is clear and either reaches the goal or has enough left to run;
+            // a cut (partial) trajectory is extended once less than holo_replan_horizon_ remains
+            if(clear && (reaches_goal || trajDuration() - t_now > holo_replan_horizon_))
+              return;
           }
 
           state_machine_ = StateMachine::REPLAN;
 
           predicted_traj_start_time_ = current + max_replan_time_ - plan_start_time_;
-          msplanner_->get_the_predicted_state(predicted_traj_start_time_, plan_start_state_XYTheta, plan_start_state_VAJ, plan_start_state_OAJ);
+          if(holonomic_){
+            holo_head_ = holo_->getPVA(predicted_traj_start_time_);
+            plan_start_state_XYTheta = holo_head_.col(0);
+            // only used by JPS for its initial time guess
+            plan_start_state_VAJ << holo_head_.col(1).head(2).norm(), 0.0, 0.0;
+            plan_start_state_OAJ << 0.0, 0.0, 0.0;
+          }
+          else
+            msplanner_->get_the_predicted_state(predicted_traj_start_time_, plan_start_state_XYTheta, plan_start_state_VAJ, plan_start_state_OAJ);
 
         } 
         
@@ -290,6 +334,34 @@ class PlanManager
         ROS_INFO("\033[41;37m all of front end time:%f \033[0m", (ros::Time::now()-astar_start_time).toSec());
 
         // optimizer
+        if(holonomic_){
+          if(!holo_->plan(jps_planner_->flat_traj_, holo_head_)){
+            // A failed REPLAN keeps executing the current (already verified) trajectory as long as the rest of it is
+            // still clear of the updated map; the next replan cycle tries again.
+            if(plan_start_time_ > 0){
+              const double t_now = ros::Time::now().toSec() - plan_start_time_;
+              const double clr = holo_->remainingClearance(t_now);
+              if(clr >= holo_->finalMinSafeDis()){
+                ROS_WARN("Holonomic replan failed; keeping the current trajectory (remaining clearance %.3f m)", clr);
+                return;
+              }
+            }
+            // Otherwise report the failure and stop: drop the goal, go IDLE, brake if a trajectory is being executed.
+            if(plan_start_time_ > 0){
+              std_msgs::Bool emergency_stop;
+              emergency_stop.data = true;
+              emergency_stop_pub_.publish(emergency_stop);
+            }
+            state_machine_ = StateMachine::IDLE;
+            have_goal_ = false;
+            ROS_ERROR("Holonomic optimizer failed! Goal dropped, waiting for a new goal.");
+            return;
+          }
+          ROS_INFO("\033[43;32m all of plan time:%f \033[0m", (ros::Time::now().toSec()-current));
+          holo_->pathPub(visualizer_->mincoPathPath);
+          holo_->pointPub(visualizer_->mincoPointMarker, Eigen::Vector3d(239, 41, 41));
+        }
+        else{
         bool result = msplanner_->minco_plan(jps_planner_->flat_traj_);
         if(!result){
           return;
@@ -300,6 +372,7 @@ class PlanManager
         // visualization
         msplanner_->mincoPathPub(msplanner_->final_traj_, plan_start_state_XYTheta, visualizer_->mincoPathPath);
         msplanner_->mincoPointPub(msplanner_->final_traj_, plan_start_state_XYTheta, visualizer_->mincoPointMarker, Eigen::Vector3d(239, 41, 41));
+        }
         
         // for replan
         if(plan_start_time_ < 0){
@@ -312,9 +385,10 @@ class PlanManager
         }
         
 
-        MPCPathPub(plan_start_time_);
+        if(holonomic_) HoloPathPub();
+        else MPCPathPub(plan_start_time_);
 
-        Traj_total_time_ = msplanner_->final_traj_.getTotalDuration();
+        Traj_total_time_ = trajDuration();
       }
 
       if((ros::Time::now() - Traj_start_time_).toSec() >= Traj_total_time_){
@@ -332,6 +406,11 @@ class PlanManager
       std::vector<Eigen::Vector3d> start_path_both_end;
       bool if_forward = true;
       if(plan_start_time_ > 0){
+        if(holonomic_){
+          start_path = holo_->getPath(predicted_traj_start_time_, predicted_traj_start_time_ + jps_planner_->jps_truncation_time_);
+          start_state = start_path.back();
+        }
+        else
         start_path = msplanner_->get_the_predicted_state_and_path(predicted_traj_start_time_, predicted_traj_start_time_ + jps_planner_->jps_truncation_time_, plan_start_state_XYTheta, start_state, if_forward);
         u_int start_path_size = start_path.size();
         u_int start_path_i = 0;
@@ -359,6 +438,16 @@ class PlanManager
         start_state = plan_start_state_XYTheta;
       }
 
+      // Holonomic mode: if the start is inside the JPS clearance (obstacle revealed late), search from the nearest
+      // free spot within 1 m; the optimizer still starts from the real pose and is allowed to move away from there.
+      if(holonomic_ && sdfmap_->getDistanceReal(start_state.head(2)) < jps_safe_dis_ + 0.1){
+        Eigen::Vector2d p; double r;
+        if(nearestFree(start_state.head(2), jps_safe_dis_ + 0.1, 1.0, p, r)){
+          ROS_WARN("Start (%.2f, %.2f) is inside the path-search clearance: JPS starts %.2f m away at (%.2f, %.2f).",
+                   start_state.x(), start_state.y(), r, p.x(), p.y());
+          start_state.head(2) = p;
+        }
+      }
       if(!jps_planner_->plan(start_state, goal_state_)){
         return false;
       }
@@ -395,6 +484,30 @@ class PlanManager
       ROS_INFO("\033[40;36m jps_planner_ search time:%lf  \033[0m", (ros::Time::now()-current).toSec());
 
       return true;
+    }
+
+    double trajDuration(){
+      return holonomic_ ? holo_->final_traj_.getTotalDuration() : msplanner_->final_traj_.getTotalDuration();
+    }
+
+    // Holonomic trajectory message: (x, y, theta) flat output, world frame, model = HOLONOMIC.
+    void HoloPathPub(){
+      carstatemsgs::Polynome polynome;
+      polynome.header.frame_id = "world";
+      polynome.header.stamp = ros::Time::now();
+      polynome.model = carstatemsgs::Polynome::HOLONOMIC;
+      auto v3 = [](const Eigen::Vector3d &v){ geometry_msgs::Vector3 m; m.x = v.x(); m.y = v.y(); m.z = v.z(); return m; };
+      polynome.init_p = v3(holo_->head_.col(0));
+      polynome.init_v = v3(holo_->head_.col(1));
+      polynome.init_a = v3(holo_->head_.col(2));
+      polynome.tail_p = v3(holo_->tail_.col(0));
+      polynome.tail_v = v3(holo_->tail_.col(1));
+      polynome.tail_a = v3(holo_->tail_.col(2));
+      polynome.start_position = v3(holo_->head_.col(0));
+      for(int i = 0; i < holo_->final_inner_.cols(); i++) polynome.innerpoints.push_back(v3(holo_->final_inner_.col(i)));
+      for(int i = 0; i < holo_->final_times_.size(); i++) polynome.t_pts.push_back(holo_->final_times_(i));
+      polynome.traj_start_time = ros::Time(plan_start_time_);
+      mpc_polynome_pub_.publish(polynome);
     }
 
     void MPCPathPub(const double& traj_start_time){
