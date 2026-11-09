@@ -56,6 +56,8 @@ ros::Subscriber _global_map_sub;
 ros::Timer _local_sensing_timer;
 
 bool _has_global_map(false);
+bool _dynamic_map(false);   // true: re-read every global map message (moving obstacles, rov_gazebo_bridge); default:
+                            // read the map once (original behaviour)
 bool _has_odom(false);
 bool _use_resolution_filter(true);
 bool _hrz_limited(false);
@@ -322,10 +324,11 @@ void rcvOdometryCallbck(const carstatemsgs::CarState::ConstPtr &laser_odom)
 
 void rcvGlobalPointCloudCallBack(const sensor_msgs::PointCloud2 &pointcloud_map)
 {
-  if (_has_global_map)
+  if (_has_global_map && !_dynamic_map)
     return;
 
-  ROS_WARN("Global Pointcloud received..");
+  if (!_has_global_map)
+    ROS_WARN("Global Pointcloud received..%s", _dynamic_map ? " (dynamic map: re-read on every message)" : "");
 
   pcl::PointCloud<pcl::PointXYZ> cloud_input;
   pcl::fromROSMsg(pointcloud_map, cloud_input);
@@ -337,7 +340,8 @@ void rcvGlobalPointCloudCallBack(const sensor_msgs::PointCloud2 &pointcloud_map)
   _kdtreeLocalMap.setInputCloud(_cloud_all_map.makeShared());
 
   _has_global_map = true;
-  _global_map_sub.shutdown();
+  if (!_dynamic_map)
+    _global_map_sub.shutdown();
 }
 
 void perspectivePoints(const ros::TimerEvent &event)
@@ -544,6 +548,7 @@ int main(int argc, char **argv)
   nh.getParam(ros::this_node::getName()+"/pc_resolution", _pc_resolution);
   std::cout<<"_pc_resolution: "<<_pc_resolution<<std::endl;
   nh.getParam(ros::this_node::getName()+"/use_resolution_filter", _use_resolution_filter);
+  nh.param<bool>(ros::this_node::getName()+"/dynamic_map", _dynamic_map, false);
   nh.getParam(ros::this_node::getName()+"/hrz_limited", _hrz_limited);
 
   nh.getParam(ros::this_node::getName()+"/hrz_laser_line_num", _hrz_laser_line_num);

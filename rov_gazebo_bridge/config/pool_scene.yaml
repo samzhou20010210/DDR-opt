@@ -1,0 +1,40 @@
+# Pool scene for planner_gazebo.launch (pool_scene.py). All coordinates in the POOL frame (DDR-opt "world"):
+# origin at the pool corner, x across the pool (width), y along it (length). Gazebo world = pool - (12.5, 25).
+#
+# Pool: standard 50 m long-course competition pool (World Aquatics / Olympic; China's national standard uses the same
+# 50 x 25 m, 10 lanes x 2.5 m). The Gazebo pool model (uwv_env sauvc_pool) is already 25 x 50 m with 2 m deep walls,
+# so only the lanes and obstacles are added here.
+pool:
+  width:  25.0          # m, x
+  length: 50.0          # m, y
+  depth:  2.0           # m, walls of the Gazebo model (World Aquatics minimum)
+
+# Lane lines: VISUAL ONLY (no collision in Gazebo, not in the planner's map). 10 lanes x 2.5 m -> 9 lane lines
+# between the lanes, running the full 50 m along y, floating at the surface.
+lanes:
+  count:  10
+  width:  2.5           # m
+  rope_radius: 0.05     # m
+  rope_z: -0.05         # m (surface z = 0)
+
+# Obstacles: vertical columns from the pool floor to the surface (they cross the 1 m operating depth).
+#   shape: cylinder (radius) | box (size_x, size_y)
+#   static: position [x, y]
+#   dynamic, motion "line": back and forth between a and b at speed (m/s)
+#   dynamic, motion "circle": around centre with radius at speed (m/s), starting at phase (rad)
+# Edit freely; planner_gazebo.launch scene:=empty disables all obstacles.
+# Dynamic obstacles are seen by the planner as their CURRENT position only (DDR-opt has no motion prediction): it
+# replans when one comes close to the remaining trajectory. Keep their speed well below the ROV's (~0.7 m/s).
+obstacles:
+  static:
+    - {name: s1_pillar,  shape: cylinder, radius: 0.5,              position: [6.25, 15.0]}
+    - {name: s2_block,   shape: box,      size_x: 2.0, size_y: 1.0, position: [17.5, 22.0]}
+    - {name: s3_pillar,  shape: cylinder, radius: 0.4,              position: [11.25, 32.0]}
+    - {name: s4_wall,    shape: box,      size_x: 1.0, size_y: 3.0, position: [21.0, 33.0]}
+    - {name: s5_pillar,  shape: cylinder, radius: 0.6,              position: [4.0, 40.0]}
+  dynamic:
+    - {name: d1_swimmer, shape: cylinder, radius: 0.4, motion: line,   a: [16.25, 10.0], b: [16.25, 40.0], speed: 0.2}
+    - {name: d2_float,   shape: box, size_x: 1.0, size_y: 1.0, motion: line, a: [3.0, 27.0], b: [22.0, 27.0], speed: 0.15}
+    - {name: d3_buoy,    shape: cylinder, radius: 0.3, motion: circle, centre: [19.0, 44.0], radius_path: 2.0, speed: 0.2, phase: 0.0}
+
+update_rate: 20.0       # Hz: dynamic obstacle poses (Gazebo) and the obstacle cloud for the planner

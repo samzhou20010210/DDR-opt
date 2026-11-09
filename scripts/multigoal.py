@@ -36,6 +36,7 @@ from nav_msgs.msg import Odometry, Path
 from rosgraph_msgs.msg import Log
 from sensor_msgs.msg import PointCloud2
 from std_msgs.msg import Bool, Float64, Float64MultiArray
+from visualization_msgs.msg import Marker, MarkerArray
 from carstatemsgs.msg import Polynome, CarState
 from tf.transformations import quaternion_from_euler, euler_from_quaternion
 
@@ -82,6 +83,9 @@ class Recorder:
         self.drops, self.snaps, self.estops = [], [], []
         self.obst = None
         rospy.Subscriber(topics["pose"], PoseStamped, self.cb_pose, queue_size=500)
+        self.scene = []       # (t, [(shape, x, y, sx, sy, dynamic)]): Gazebo obstacles at each time
+        if topics.get("scene"):
+            rospy.Subscriber(topics["scene"], MarkerArray, self.cb_scene, queue_size=50)
         if topics.get("depth"):
             rospy.Subscriber(topics["depth"], Float64, lambda m: self.depth.append((rospy.get_time(), m.data)), queue_size=500)
         rospy.Subscriber("/planner/traj_poly", Polynome, self.cb_traj, queue_size=20)
@@ -103,6 +107,11 @@ class Recorder:
 
     def cb_pose(self, m):
         self.pose.append((rospy.get_time(), m.pose.position.x, m.pose.position.y, yaw_of(m.pose.orientation)))
+
+    def cb_scene(self, m):
+        obs = [("cyl" if k.type == Marker.CYLINDER else "box", k.pose.position.x, k.pose.position.y, k.scale.x,
+                k.scale.y, k.color.r > 0.85) for k in m.markers if k.ns == "obstacles"]
+        self.scene.append((rospy.get_time(), obs))
 
     def cb_odom(self, m):
         t = m.twist.twist
@@ -213,6 +222,31 @@ def raw_acc(od):
     return round(float((np.linalg.norm(np.diff(V, axis=0), axis=1) / dt).max()), 3)
 
 
+def scene_clearance(poses, scene, size):
+    """min distance from the robot centre to the walls / static / dynamic obstacle surfaces, with each pose matched to
+    the obstacle positions at that time (Gazebo mode)"""
+    W, L = size
+    best = {"wall": np.inf, "static": np.inf, "dynamic": np.inf}
+    if not poses:
+        return best
+    ts = np.array([sc[0] for sc in scene]) if scene else None
+    for p in poses[::2]:
+        t, x, y = p[0], p[1], p[2]
+        best["wall"] = min(best["wall"], x, W - x, y, L - y)
+        if ts is None:
+            continue
+        k = max(int(np.searchsorted(ts, t)) - 1, 0)
+        for shape, ox, oy, sx, sy, dyn in scene[k][1]:
+            if shape == "cyl":
+                d = math.hypot(x - ox, y - oy) - sx / 2
+            else:
+                dx, dy = max(abs(x - ox) - sx / 2, 0.0), max(abs(y - oy) - sy / 2, 0.0)
+                d = math.hypot(dx, dy) if (dx > 0 or dy > 0) else -min(sx / 2 - abs(x - ox), sy / 2 - abs(y - oy))
+            key = "dynamic" if dyn else "static"
+            best[key] = min(best[key], d)
+    return best
+
+
 def path_len(pts):
     return float(sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(pts[:-1], pts[1:])))
 
@@ -249,8 +283,8 @@ def main():
     if holo:
         vert = [i for i, z in enumerate(rospy.get_param("/thruster_allocation/thrusters/axis_z")) if abs(z) > 0.5]
         fmax, fmin = rospy.get_param("/thruster_allocation/thrusters/f_max"), rospy.get_param("/thruster_allocation/thrusters/f_min")
-    topics = ({"pose": "/gazebo_bridge/pose", "odom": "/gazebo_bridge/odom", "map": "/pool_obstacles/cloud",
-               "depth": "/gazebo_bridge/depth"} if a.gazebo else
+    topics = ({"pose": "/gazebo_bridge/pose", "odom": "/gazebo_bridge/odom", "map": "/pool_scene/cloud",
+               "depth": "/gazebo_bridge/depth", "scene": "/pool_scene/markers"} if a.gazebo else
               {"pose": "/simulation/PosePosePub", "odom": "/simulation/PoseOdomPub", "map": "/global_map/gridmap"})
     depth_target = rospy.get_param("/gazebo_bridge/depth/target", None) if a.gazebo else None
     R = Recorder(holo, topics)
@@ -387,6 +421,13 @@ def main():
                          "period_ms": stats([n[5] for n in nm if n[5] > 0]),
                          "over_budget": sum(1 for n in nm if n[1] > NMPC_BUDGET_MS), "cycles": len(nm)}})
         if a.gazebo:
+            pool = rospy.get_param("/pool_scene/pool", {"width": 25.0, "length": 50.0})
+            sc = scene_clearance(seg, R.scene, (pool["width"], pool["length"]))
+            hull = rospy.get_param("/global_planning/finalMinSafeDis", 0.722)
+            r["min_clearance_m"] = round(min(sc.values()), 3)   # centre to nearest wall / obstacle surface
+            r["clearance_wall_static_dynamic_m"] = [round(v, 3) if np.isfinite(v) else None for v in
+                                                    (sc["wall"], sc["static"], sc["dynamic"])]
+            r["min_gap_to_hull_m"] = round(min(sc.values()) - hull, 3)   # < 0: the hull circle touched something
             dp = [d[1] for d in win(R.depth)]
             r["depth_err_max_m"] = round(max(abs(d - depth_target) for d in dp), 3) if dp else None
             r["depth_err_mean_m"] = round(float(np.mean([abs(d - depth_target) for d in dp])), 3) if dp else None

@@ -83,6 +83,7 @@ class SDFmap
     double detection_range_;
 
     bool if_perspective_;
+    bool if_dynamic_map_ = false;  // perspective mode: rebuild the sensed window from each cloud (moving obstacles)
 
     bool if_cirSupRaycast_;
 
@@ -140,6 +141,9 @@ class SDFmap
       nh_.param<double>(ros::this_node::getName()+"/global_y_upper",global_y_upper_, 10);
 
       nh_.param<bool>(ros::this_node::getName()+"/if_perspective",if_perspective_,false);
+      // if_dynamic_map (perspective only, default false = original accumulate-only map): every update clears the cells
+      // inside the detection window and marks only the current cloud, so a moved obstacle leaves no trail
+      nh_.param<bool>(ros::this_node::getName()+"/if_dynamic_map",if_dynamic_map_,false);
       // std::cout<<"if_perspective: "<<if_perspective_<<std::endl;
 
       nh_.param<bool>(ros::this_node::getName()+"/if_cirSupRaycast", if_cirSupRaycast_, false);

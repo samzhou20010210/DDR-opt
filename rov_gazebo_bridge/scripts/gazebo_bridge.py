@@ -35,6 +35,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool, Float64, Float64MultiArray
 from std_srvs.srv import Trigger, TriggerResponse
 from carstatemsgs.msg import CarState
+from visualization_msgs.msg import Marker
 from tf.transformations import euler_from_quaternion, quaternion_from_euler, quaternion_matrix
 
 
@@ -74,6 +75,7 @@ class Bridge:
         self.depth_pub = rospy.Publisher("~depth", Float64, queue_size=10)
         self.cmd_pub = rospy.Publisher("/rov_v4/thruster_command", JointState, queue_size=10)
         self.safety_pub = rospy.Publisher("/safety_stop", Bool, queue_size=1, latch=True)
+        self.marker_pub = rospy.Publisher("~robot_marker", Marker, queue_size=1)   # ROV_V4 mesh for rviz
         self.tf = tf2_ros.TransformBroadcaster()
         st = tf2_ros.StaticTransformBroadcaster()
         t = TransformStamped()
@@ -136,6 +138,14 @@ class Bridge:
         t.transform.rotation = q
         self.tf.sendTransform(t)
         self.depth_pub.publish(Float64(-z))
+        mk = Marker(type=Marker.MESH_RESOURCE, action=Marker.ADD, ns="rov", id=0,
+                    mesh_resource="package://uwv_description/meshes/rov_v4/ROV_V4.STL")
+        mk.header.stamp, mk.header.frame_id = stamp, "world"
+        mk.pose.position.x, mk.pose.position.y, mk.pose.position.z = x, y, z
+        mk.pose.orientation = q                                     # full 3D attitude
+        mk.scale.x = mk.scale.y = mk.scale.z = 1.0
+        mk.color.r, mk.color.g, mk.color.b, mk.color.a = 0.1, 0.7, 0.2, 1.0
+        self.marker_pub.publish(mk)
 
         # depth (z up, depth = -z) and attitude hold -> (Z, K, M) in the body frame
         now = stamp.to_sec()

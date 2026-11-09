@@ -110,6 +110,11 @@ void SDFmap::updateOccupancyCallback(const ros::TimerEvent& /*event*/){
       for (int y=min_id.y(); y<=max_id.y(); y++){
         if(gridmap_[Index2Vectornum(x,y)] == Unknown)
           gridmap_[Index2Vectornum(x,y)] = Unoccupied;
+        // dynamic map: forget what the sensor sees again now (only inside its range circle, so cells in the corners
+        // of the square window that the sensor cannot see keep their state)
+        else if(if_dynamic_map_ &&
+                (gridIndex2coordd(Eigen::Vector2i(x, y)) - odom_pos_.head(2)).norm() <= detection_range_)
+          gridmap_[Index2Vectornum(x,y)] = Unoccupied;
       }
     }
 

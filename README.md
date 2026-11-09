@@ -175,6 +175,7 @@ The `rov_holo` planner, NMPC and thruster allocation run unchanged on ROV_V4 in 
 ``` bash
 # needs src/uwv-simulator and src/freefloating_gazebo next to DDR-opt-main (not part of this repo)
 DISABLE_ROS1_EOL_WARNINGS=1 roslaunch rov_gazebo_bridge planner_gazebo.launch     # rviz; gui:=true adds gzclient
+#   scene:=empty (no obstacles) | scene_file:=<your yaml> | start_x/start_y/start_yaw
 scripts/run_headless_gazebo.sh [--no-build] [--goal X Y YAW]                      # hold + 14 goals + stop tests
 ```
 - **Frame:** DDR-opt's `world` is the pool corner. The 25 × 50 m pool is x ∈ [0, 25], y ∈ [0, 50], which is Gazebo's
@@ -194,8 +195,25 @@ scripts/run_headless_gazebo.sh [--no-build] [--goal X Y YAW]                    
     chosen to reduce clamping (placeholders).
   - It runs at 50 Hz even without commands.
   - The 2D mode is unchanged apart from the effective mass below.
-- **`pool_obstacles`:** the four pool walls as a point cloud, which `laser_simulator` turns into what the planner
-  sees. Version 1 is walls only, and the SAUVC props are not spawned. TODO: dynamic obstacles.
+- **Pool scene** (`pool_scene.py`, `config/pool_scene.yaml`; `scene:=empty` = walls and lanes only):
+  - **Pool:** standard 50 m long-course competition pool, 50 × 25 m and 2 m deep (World Aquatics / Olympic; China's
+    national standard is the same 50 × 25 m with 10 lanes). The Gazebo pool model already had this size; the SAUVC
+    props are not spawned.
+  - **Lanes:** 10 lanes of 2.5 m, so 9 lane lines along y at x = 2.5, 5, …, 22.5. They float at the surface in
+    blue/white 5 m segments. They are **visual only**: no collision in Gazebo, and not in the planner's map.
+  - **Obstacles:** floor-to-surface columns, defined by hand in `pool_scene.yaml`.
+    - Static (orange): s1–s5, pillars and blocks.
+    - Dynamic (red): d1 moves along a lane at 0.2 m/s, d2 moves across the pool at 0.15 m/s, d3 circles a point at
+      0.2 m/s. In Gazebo they are kinematic models moved along their paths in sim time.
+  - **What the planner sees:** the walls plus every obstacle at its current position, as a point cloud.
+    `laser_simulator` (`dynamic_map: true`, re-reads every cloud) passes it to the planner. The planner's map
+    (`if_dynamic_map: true`) clears what the sensor sees again, so a moved obstacle leaves no trail.
+  - **Moving obstacles:** DDR-opt has **no motion prediction**; it sees only where each obstacle is now. With
+    `replan_time` 0.08, rov_holo replans when the updated map comes within `jps_safe_dis` of the remaining
+    trajectory. Keep obstacle speeds well below the ROV's.
+  - **Defaults:** both dynamic-map parameters default to false, so the car, `rov` and the 2D `rov_holo` launch files
+    are unchanged.
+  - **RViz** (`rviz/pool.rviz`): lanes, obstacles and the ROV_V4 mesh (green, `/gazebo_bridge/robot_marker`).
 
 #### Stops
 Gazebo keeps applying the last thruster command forever, so "off" always means actively sending zeros.

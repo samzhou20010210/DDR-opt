@@ -13,6 +13,9 @@
   <arg name="pool_offset_x" value="12.5"/>
   <arg name="pool_offset_y" value="25.0"/>
   <arg name="detection_range" default="30.0"/>
+  <!-- scene:=default: lanes + static and moving obstacles from config/pool_scene.yaml; scene:=empty: walls + lanes -->
+  <arg name="scene" default="default"/>
+  <arg name="scene_file" default="$(find rov_gazebo_bridge)/config/pool_scene.yaml"/>
   <!-- spawn pose in Gazebo's world frame -->
   <arg name="gz_x" value="$(eval arg('start_x') - arg('pool_offset_x'))"/>
   <arg name="gz_y" value="$(eval arg('start_y') - arg('pool_offset_y'))"/>
@@ -20,7 +23,7 @@
   <arg name="odom_topic" value="/gazebo_bridge/odom"/>
   <arg name="traj_topic" value="/planner/traj_poly"/>
 
-  <!-- Gazebo: pool only (no SAUVC props: version 1 plans around the walls only), running, sim time -->
+  <!-- Gazebo: the 50 x 25 m pool only (no SAUVC props), running, sim time; lanes and obstacles come from pool_scene -->
   <include file="$(find gazebo_ros)/launch/empty_world.launch">
     <arg name="world_name" value="$(find uwv_env)/worlds/sauvc_pool.world"/>
     <arg name="gui" value="$(arg gui)"/>
@@ -34,21 +37,24 @@
           args="-urdf -model rov_v4 -param robot_description -x $(arg gz_x) -y $(arg gz_y) -z $(arg gz_z) -Y $(arg start_yaw)"/>
   </group>
 
-  <!-- bridge + pool obstacles -->
+  <!-- bridge + pool scene (lane lines, obstacles, obstacle cloud for the planner) -->
   <node name="gazebo_bridge" pkg="rov_gazebo_bridge" type="gazebo_bridge.py" output="screen">
     <rosparam file="$(find rov_gazebo_bridge)/config/bridge.yaml" command="load"/>
     <rosparam file="$(find plan_manager)/config/rov_thrusters.yaml" command="load"/>
     <param name="pool_offset" value="[$(arg pool_offset_x), $(arg pool_offset_y)]" type="yaml"/>
   </node>
-  <node name="pool_obstacles" pkg="rov_gazebo_bridge" type="pool_obstacles.py" output="screen">
-    <rosparam param="pool_size">[25.0, 50.0]</rosparam>
+  <node name="pool_scene" pkg="rov_gazebo_bridge" type="pool_scene.py" output="screen">
+    <rosparam file="$(arg scene_file)" command="load"/>
+    <param name="scene" value="$(arg scene)"/>
+    <param name="pool_offset" value="[$(arg pool_offset_x), $(arg pool_offset_y)]" type="yaml"/>
   </node>
   <node pkg="laser_simulator" type="laser_sim_node" name="laser_simulator" output="screen">
     <rosparam file="$(find laser_simulator)/config/perspective_laser.yaml" command="load"/>
     <param name="if_perspective" value="true"/>
     <param name="pc_resolution" value="0.1"/>
-    <param name="sensing_horizon" value="$(arg detection_range)"/>
-    <param name="map_topic" value="/pool_obstacles/cloud"/>
+    <param name="sensing_horizon" value="$(eval arg('detection_range') + 1.0)"/>
+    <param name="map_topic" value="/pool_scene/cloud"/>
+    <param name="dynamic_map" value="true"/>   <!-- re-read the obstacle cloud (moving obstacles) -->
     <param name="odom_topic" value="/gazebo_bridge/car_state"/>
   </node>
 
@@ -68,7 +74,9 @@
     <param name="final_x" value="0.0"/>
     <param name="final_y" value="0.0"/>
     <param name="final_yaw" value="0.0"/>
-    <param name="replan_time" value="5000"/>
+    <!-- moving obstacles: replan check every 0.08 s; rov_holo only replans when the updated map comes within
+         jps_safe_dis of the rest of the trajectory (holo/replan_on_collision_only) -->
+    <param name="replan_time" value="0.08"/>
     <param name="max_replan_time" value="0.05"/>
     <param name="gridmap_interval" value="0.1"/>
     <param name="path_gridmap_interval" value="0.05"/>
@@ -78,6 +86,7 @@
     <param name="global_y_lower" value="-1.0"/>
     <param name="global_y_upper" value="51.0"/>
     <param name="if_perspective" value="true"/>
+    <param name="if_dynamic_map" value="true"/>   <!-- map follows moving obstacles (no trails) -->
     <param name="if_cirSupRaycast" value="false"/>
     <param name="hrz_limited" value="false"/>
     <param name="hrz_laser_range_dgr" value="90.0"/>
@@ -97,5 +106,5 @@
     <arg name="gazebo" value="true"/>
   </include>
 
-  <node if="$(arg rviz)" name="rviz" pkg="rviz" type="rviz" args="-d $(find plan_manager)/rviz/planner_sim.rviz" output="log"/>
+  <node if="$(arg rviz)" name="rviz" pkg="rviz" type="rviz" args="-d $(find rov_gazebo_bridge)/rviz/pool.rviz" output="log"/>
 </launch>

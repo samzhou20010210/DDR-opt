@@ -22,4 +22,6 @@
   <exec_depend>uwv_description</exec_depend>
   <exec_depend>uwv_env</exec_depend>
   <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>gazebo_msgs</exec_depend>
+  <exec_depend>visualization_msgs</exec_depend>
 </package>
