@@ -12,6 +12,12 @@
 //      The horizontal thrusters (z = 0.045 m) create roll / pitch moments that the vertical thrusters cancel;
 //      check_allocation.py shows this needs at most ~5.5 N per vertical thruster for ANY horizontal command, so
 //      the equalities are always feasible with the placeholder limits.
+//   Optional (Gazebo, rov_gazebo_bridge):
+//     - zkm_target/enable: the heave / roll / pitch equalities take the targets on ~zkm (WrenchStamped force.z,
+//       torque.x, torque.y; from the bridge's depth / attitude hold) instead of 0.
+//     - velocity_feedback/enable: tau_p += K (v_cmd - v_meas) with v_meas the body twist on ~odom, closing the
+//       velocity loop around the feed-forward model (the 2D simulator follows the command exactly and needs none).
+//   thrusters/moment_ref: point the moments are taken about (estimated centre of mass; default the hull centre).
 //   3. If the equality-constrained QP is infeasible anyway (e.g. once real buoyancy / CoM offsets are added), it falls
 //      back to weighted least squares over all 6 axes (`weights`) and reports `saturated`.
 //   4. publish thrusts, desired / achieved wrench and `saturated` (= planar residual |B_p f - tau_p| above
@@ -24,6 +30,7 @@
 #include <geometry_msgs/Twist.h>
 #include <geometry_msgs/AccelStamped.h>
 #include <geometry_msgs/WrenchStamped.h>
+#include <nav_msgs/Odometry.h>
 #include <std_msgs/Bool.h>
 #include <std_msgs/Float64MultiArray.h>
 
@@ -51,6 +58,15 @@ public:
         pnh_.param("weights", w, std::vector<double>{1.0, 1.0, 1.0, 1.0, 1.0, 1.0});
         pnh_.param("regularisation", eps_, 1e-4);
         pnh_.param("saturation_tolerance", tol_, 0.5);
+        std::vector<double> mref, kv;
+        pnh_.param("thrusters/moment_ref", mref, std::vector<double>{0.0, 0.0, 0.0});
+        pnh_.param("zkm_target/enable", zkm_enable_, false);
+        pnh_.param("zkm_target/timeout", zkm_timeout_, 0.5);
+        pnh_.param("velocity_feedback/enable", vfb_enable_, false);
+        pnh_.param("velocity_feedback/gains", kv, std::vector<double>{150.0, 150.0, 40.0});
+        pnh_.param("velocity_feedback/timeout", odom_timeout_, 0.5);
+        Kv_ = Eigen::Vector3d(kv.at(0), kv.at(1), kv.at(2));
+        mref_ = Eigen::Vector3d(mref.at(0), mref.at(1), mref.at(2));
         n_ = x.size();
         if (n_ == 0 || y.size() != n_ || z.size() != n_ || ax.size() != n_ || ay.size() != n_ || az.size() != n_ ||
             names_.size() != n_)
@@ -64,7 +80,7 @@ public:
         B_.resize(6, n_);
         for (size_t i = 0; i < n_; i++)
         {
-            const Eigen::Vector3d r(x[i], y[i], z[i]);
+            const Eigen::Vector3d r = Eigen::Vector3d(x[i], y[i], z[i]) - mref_;
             const Eigen::Vector3d d = Eigen::Vector3d(ax[i], ay[i], az[i]).normalized();
             B_.col(i) << d, r.cross(d);
         }
@@ -75,6 +91,16 @@ public:
 
         cmd_sub_ = pnh_.subscribe("cmd", 1, &ThrusterAllocation::cmdCallback, this);
         acc_sub_ = pnh_.subscribe("accel", 1, &ThrusterAllocation::accCallback, this);
+        if (zkm_enable_)
+        {
+            zkm_sub_ = pnh_.subscribe("zkm", 1, &ThrusterAllocation::zkmCallback, this);
+            pnh_.param("cmd_timeout", cmd_timeout_, 0.2);
+            timer_ = pnh_.createTimer(ros::Duration(0.02), &ThrusterAllocation::timerCallback, this);
+        }
+        if (vfb_enable_) odom_sub_ = pnh_.subscribe("odom", 1, &ThrusterAllocation::odomCallback, this);
+        ROS_WARN("[allocation] moments about (%.3f, %.3f, %.3f); heave/roll/pitch targets: %s; velocity feedback: %s "
+                 "(K %.0f %.0f %.0f)", mref_(0), mref_(1), mref_(2), zkm_enable_ ? "~zkm" : "0",
+                 vfb_enable_ ? "ON" : "off", Kv_(0), Kv_(1), Kv_(2));
         thrust_pub_ = pnh_.advertise<std_msgs::Float64MultiArray>("thrust", 1);
         wdes_pub_ = pnh_.advertise<geometry_msgs::WrenchStamped>("wrench_desired", 1);
         wach_pub_ = pnh_.advertise<geometry_msgs::WrenchStamped>("wrench_achieved", 1);
@@ -83,7 +109,14 @@ public:
 
 private:
     ros::NodeHandle pnh_;
-    ros::Subscriber cmd_sub_, acc_sub_;
+    ros::Subscriber cmd_sub_, acc_sub_, zkm_sub_, odom_sub_;
+    bool zkm_enable_ = false, vfb_enable_ = false;
+    double zkm_timeout_ = 0.5, odom_timeout_ = 0.5;
+    Eigen::Vector3d zkm_ = Eigen::Vector3d::Zero(), vmeas_ = Eigen::Vector3d::Zero(), Kv_, mref_;
+    ros::Time zkm_time_, odom_time_, cmd_time_;
+    Eigen::Vector3d cmd_ = Eigen::Vector3d::Zero();
+    double cmd_timeout_ = 0.2;
+    ros::Timer timer_;
     ros::Publisher thrust_pub_, wdes_pub_, wach_pub_, sat_pub_;
     std::vector<std::string> names_;
     size_t n_ = 0;
@@ -93,6 +126,18 @@ private:
     Eigen::MatrixXd B_;
     Eigen::VectorXd f_prev_;
     long n_calls_ = 0, n_sat_ = 0;
+
+    void zkmCallback(const geometry_msgs::WrenchStamped::ConstPtr &m)
+    {
+        zkm_ << m->wrench.force.z, m->wrench.torque.x, m->wrench.torque.y;
+        zkm_time_ = ros::Time::now();
+    }
+
+    void odomCallback(const nav_msgs::Odometry::ConstPtr &m)
+    {
+        vmeas_ << m->twist.twist.linear.x, m->twist.twist.linear.y, m->twist.twist.angular.z;
+        odom_time_ = ros::Time::now();
+    }
 
     void accCallback(const geometry_msgs::AccelStamped::ConstPtr &m)
     {
@@ -123,12 +168,48 @@ private:
         return f.allFinite();
     }
 
+    // With heave / roll / pitch targets (Gazebo) the allocation must run even when no planar command arrives
+    // (before the first trajectory, after an emergency stop): a 50 Hz timer allocates the last command, or zero
+    // planar motion once it is older than cmd_timeout. Without targets (2D) it runs once per command, as before.
     void cmdCallback(const geometry_msgs::Twist::ConstPtr &m)
     {
-        const Eigen::Vector3d v(m->linear.x, m->linear.y, m->angular.z);
+        cmd_ << m->linear.x, m->linear.y, m->angular.z;
+        cmd_time_ = ros::Time::now();
+        if (!zkm_enable_) allocate(cmd_);
+    }
+
+    void timerCallback(const ros::TimerEvent &)
+    {
+        const bool fresh = (ros::Time::now() - cmd_time_).toSec() < cmd_timeout_;
+        if (!fresh) acc_.setZero();
+        allocate(fresh ? cmd_ : Eigen::Vector3d::Zero());
+    }
+
+    void allocate(const Eigen::Vector3d &v)
+    {
         Eigen::Matrix<double, 6, 1> tau;
         tau << mass_ * (acc_(0) - v(2) * v(1)) + drag_(0) * v(0), mass_ * (acc_(1) + v(2) * v(0)) + drag_(1) * v(1),
             0.0, 0.0, 0.0, iz_ * acc_(2) + drag_(2) * v(2);
+        const ros::Time now = ros::Time::now();
+        if (vfb_enable_)
+        {
+            if ((now - odom_time_).toSec() < odom_timeout_)
+            {
+                const Eigen::Vector3d fb = Kv_.cwiseProduct(v - vmeas_);
+                tau(0) += fb(0);
+                tau(1) += fb(1);
+                tau(5) += fb(2);
+            }
+            else
+                ROS_WARN_THROTTLE(1.0, "[allocation] no odometry: velocity feedback off");
+        }
+        if (zkm_enable_)
+        {
+            if ((now - zkm_time_).toSec() < zkm_timeout_)
+                tau.segment<3>(2) = zkm_;
+            else
+                ROS_WARN_THROTTLE(1.0, "[allocation] no heave/roll/pitch target on ~zkm: holding 0");
+        }
 
         const Eigen::MatrixXd I = Eigen::MatrixXd::Identity(n_, n_);
         Eigen::VectorXd f = Eigen::VectorXd::Zero(n_);
@@ -140,8 +221,8 @@ private:
         Eigen::MatrixXd A(n_ + 3, n_);
         A << I, Bz;
         Eigen::VectorXd lo(n_ + 3), up(n_ + 3);
-        lo << Eigen::VectorXd::Constant(n_, fmin_), Eigen::Vector3d::Zero();
-        up << Eigen::VectorXd::Constant(n_, fmax_), Eigen::Vector3d::Zero();
+        lo << Eigen::VectorXd::Constant(n_, fmin_), tau.segment<3>(2);
+        up << Eigen::VectorXd::Constant(n_, fmax_), tau.segment<3>(2);
         bool held = solveQp(Bp.transpose() * wp.asDiagonal() * Bp + eps_ * I, -Bp.transpose() * wp.cwiseProduct(tp), A,
                             lo, up, f);
         bool ok = held;
@@ -151,7 +232,7 @@ private:
             ok = solveQp(B_.transpose() * W_.asDiagonal() * B_ + eps_ * I, -B_.transpose() * W_.cwiseProduct(tau), I,
                          Eigen::VectorXd::Constant(n_, fmin_), Eigen::VectorXd::Constant(n_, fmax_), f);
             if (!ok) f.setZero();
-            ROS_WARN_THROTTLE(1.0, "[allocation] heave/roll/pitch = 0 not feasible%s",
+            ROS_WARN_THROTTLE(1.0, "[allocation] heave/roll/pitch targets not feasible%s",
                               ok ? ", using weighted least squares" : " and fallback QP failed: zero thrust");
         }
         f = f.cwiseMax(fmin_).cwiseMin(fmax_);

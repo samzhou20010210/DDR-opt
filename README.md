@@ -158,13 +158,56 @@ Same map, start, collision circle and goal snapping as `rov`, but the ROV uses i
 - **Config**: `plan_manager/config/robot_rov_holo.yaml` (limits, model, weights) and `rov_thrusters.yaml` (layout).
 - **All dynamic numbers are PLACEHOLDERS.**
   - Speeds 1.0 / −0.3 / 0.5 m/s, 0.8 rad/s; accelerations 0.4 / 0.3 m/s², 1.0 rad/s².
-  - Mass 60 kg, Iz 6 kg m², linear drag, T500 thrust −30 to +40 N.
+  - Mass 50 kg (set by the user), Iz 6.83 kg m², linear drag 100 / 125 / 80, CoM (−0.064, 0, −0.007), T500 thrust
+    −30 to +40 N (shared with the Gazebo model).
   - Mass, inertia, drag and thrust curves are null in `simulation_parameters.json`. Passing these limits does
     **not** show that the real ROV can fly the trajectory.
 - **Not modelled**: heave, roll and pitch (constant depth assumed), added mass, quadratic drag, currents, the arms.
   Z = 0 assumes neutral buoyancy, and moments are about the hull-envelope centre (CoM unknown).
 - **Debug**: `rosparam set /global_planning/holo/gradient_check true` makes every plan compare the analytic
   gradient with finite differences.
+
+### ROV_V4 in a Gazebo pool: `rov_gazebo_bridge` (branch `rov-gazebo-v1`)
+The `rov_holo` planner, NMPC and thruster allocation run unchanged on ROV_V4 in the uwv-simulator Gazebo pool
+(freefloating_gazebo buoyancy, linear drag and thruster plugins). Gazebo replaces DDR-opt's 2D `simulator`,
+`global_map_node` and `icrekf`.
+``` bash
+# needs src/uwv-simulator and src/freefloating_gazebo next to DDR-opt-main (not part of this repo)
+DISABLE_ROS1_EOL_WARNINGS=1 roslaunch rov_gazebo_bridge planner_gazebo.launch     # rviz; gui:=true adds gzclient
+scripts/run_headless_gazebo.sh [--no-build] [--goal X Y YAW]                      # 14 goals + thrust-off checks
+```
+- **Frame:** DDR-opt's `world` is the pool corner. The 25 × 50 m pool is x ∈ [0, 25], y ∈ [0, 50], which is Gazebo's
+  world + (12.5, 25). The start (`start_x/y/yaw`, default (5, 5, 0)) and goals are in this frame.
+- **`gazebo_bridge`:**
+  - **Odometry:** `/rov_v4/sim_ground_truth` → `~odom`, giving the planar pose and the heading-frame body twist, the
+    same convention as `/simulation/PoseOdomPub`.
+  - **Thrust:** `/thruster_allocation/thrust` → `/rov_v4/thruster_command`, matched **by name** through
+    `config/bridge.yaml` `thruster_map` (CAD instance → Gazebo name).
+  - **Thrust off:** all 8 thrusters go to 0 when the allocation stops publishing (0.2 s) and on shutdown.
+  - **Depth and attitude hold:** a depth PID (1.0 m, `~depth_target`) and a roll/pitch PD, plus a constant
+    correction for the 1% net buoyancy. The resulting heave force and roll/pitch moments go to `~zkm`.
+  - **E-stop:** only stops the planar motion; depth hold continues.
+- **`thruster_allocation`** in Gazebo mode (`holo_control.launch gazebo:=true`):
+  - Heave, roll and pitch are hard equalities at the bridge's targets.
+  - A body-velocity feedback term is added: τ += K (v_cmd − v_meas), K = (150, 150, 40).
+  - It runs at 50 Hz even without commands.
+  - The 2D mode is unchanged.
+- **`pool_obstacles`:** the four pool walls as a point cloud, which `laser_simulator` turns into what the planner
+  sees. Version 1 is walls only, and the SAUVC props are not spawned. TODO: dynamic obstacles.
+- **Shared estimates** (DDR-opt yaml = `uwv_description/urdf/rov_v4.xacro`; change both together):
+
+  | Parameter | Value |
+  |---|---|
+  | Mass | 50 kg |
+  | Yaw inertia | 6.83 kg m² |
+  | Linear drag (surge, sway, yaw) | 100 / 125 / 80 |
+  | Centre of mass, used for all moments (`thrusters/moment_ref`) | (−0.064, 0, −0.007) |
+  | Thrust | Gazebo clamps at ±40 N; DDR-opt plans within [−30, 40] N |
+
+  - With 100 N/(m/s) surge drag and the 20% reserve, thrust caps steady surge near 0.9 m/s, so the reachability
+    constraint actively limits speed.
+- **Not modelled / TODO:** a real estimator (ground truth is used), added mass, quadratic drag, currents, the arms,
+  and dynamic obstacles. Dynamic feasibility is **not** claimed.
 
 ## Update
 25-12-02

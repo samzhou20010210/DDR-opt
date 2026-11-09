@@ -30,9 +30,10 @@ holo:
   # feasibility test). The vertical thrusters can always cancel the roll / pitch of the horizontal ones.
   alloc:
     enable:       true
-    mass:         60.0                  # kg        PLACEHOLDER
-    inertia_z:    6.0                   # kg m^2    PLACEHOLDER
-    linear_drag:  [60.0, 90.0, 15.0]    # N/(m/s), N/(m/s), N m/(rad/s)   PLACEHOLDER
+    # Same estimates as the Gazebo model (uwv_description/urdf/rov_v4.xacro); change both together.
+    mass:         50.0                  # kg        set by the user (2026-11-08); still an estimate
+    inertia_z:    6.83                  # kg m^2    PLACEHOLDER: solid box 1.0 x 0.8 m, m/12 (1.0^2 + 0.8^2)
+    linear_drag:  [100.0, 125.0, 80.0]  # N/(m/s), N/(m/s), N m/(rad/s)   PLACEHOLDER (rov_v4.xacro damping)
     reserve:      0.2                   # ARBITRARY: fraction of the thrust range kept free for feedback / disturbances
                                         # (= every horizontal thruster planned within [-23, 33] N instead of [-30, 40]).
                                         # Not derived from any disturbance or current model; revisit with real data.

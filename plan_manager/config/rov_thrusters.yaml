@@ -15,3 +15,7 @@ thrusters:
   # Replace with the T500 curve at the working voltage (also null) once known.
   f_max:  40.0
   f_min:  -30.0
+  # Gazebo (rov_v4.xacro thruster_max_effort) clamps symmetrically at +-40 N; DDR-opt plans within [-30, 40].
+  # Point the moments are taken about: the ESTIMATED centre of mass, the same as rov_v4.xacro com_x/y/z
+  # (moments in Gazebo act about the CoM). PLACEHOLDER until mass properties are measured.
+  moment_ref: [-0.064, 0.0, -0.007]

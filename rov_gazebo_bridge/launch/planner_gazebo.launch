@@ -1,0 +1,101 @@
+<launch>
+  <!-- DDR-opt rov_holo (HoloPlanner + holo_nmpc + thruster_allocation) on ROV_V4 in the uwv-simulator Gazebo pool.
+       Replaces DDR-opt's 2D simulator / global_map_node / icrekf; laser_simulator ray-casts the pool walls.
+         roslaunch rov_gazebo_bridge planner_gazebo.launch [gui:=false] [rviz:=false] [start_x:=.. start_y:=.. start_yaw:=..]
+       Frame "world" = pool corner: the 25 x 50 m pool is x in [0, 25], y in [0, 50] (Gazebo world + (12.5, 25)).
+       Goals: 2D Nav Goal in rviz (frame world). ALL physics numbers are ESTIMATES (rov_v4.xacro, robot_rov_holo.yaml). -->
+  <arg name="gui" default="false"/>          <!-- gzclient (software rendering on this machine: slow) -->
+  <arg name="rviz" default="true"/>
+  <arg name="start_x" default="5.0"/>        <!-- pool frame -->
+  <arg name="start_y" default="5.0"/>
+  <arg name="start_yaw" default="0.0"/>
+  <arg name="start_depth" default="1.0"/>    <!-- spawn depth, m; the bridge holds bridge.yaml depth/target -->
+  <arg name="pool_offset_x" value="12.5"/>
+  <arg name="pool_offset_y" value="25.0"/>
+  <arg name="detection_range" default="30.0"/>
+  <!-- spawn pose in Gazebo's world frame -->
+  <arg name="gz_x" value="$(eval arg('start_x') - arg('pool_offset_x'))"/>
+  <arg name="gz_y" value="$(eval arg('start_y') - arg('pool_offset_y'))"/>
+  <arg name="gz_z" value="$(eval -arg('start_depth'))"/>
+  <arg name="odom_topic" value="/gazebo_bridge/odom"/>
+  <arg name="traj_topic" value="/planner/traj_poly"/>
+
+  <!-- Gazebo: pool only (no SAUVC props: version 1 plans around the walls only), running, sim time -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find uwv_env)/worlds/sauvc_pool.world"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="verbose" value="false"/>
+  </include>
+  <group ns="/rov_v4">
+    <param name="robot_description" command="$(find xacro)/xacro $(find uwv_description)/urdf/rov_v4.xacro"/>
+    <node name="rov_v4_spawner" pkg="gazebo_ros" type="spawn_model" respawn="false" output="screen"
+          args="-urdf -model rov_v4 -param robot_description -x $(arg gz_x) -y $(arg gz_y) -z $(arg gz_z) -Y $(arg start_yaw)"/>
+  </group>
+
+  <!-- bridge + pool obstacles -->
+  <node name="gazebo_bridge" pkg="rov_gazebo_bridge" type="gazebo_bridge.py" output="screen">
+    <rosparam file="$(find rov_gazebo_bridge)/config/bridge.yaml" command="load"/>
+    <rosparam file="$(find plan_manager)/config/rov_thrusters.yaml" command="load"/>
+    <param name="pool_offset" value="[$(arg pool_offset_x), $(arg pool_offset_y)]" type="yaml"/>
+  </node>
+  <node name="pool_obstacles" pkg="rov_gazebo_bridge" type="pool_obstacles.py" output="screen">
+    <rosparam param="pool_size">[25.0, 50.0]</rosparam>
+  </node>
+  <node pkg="laser_simulator" type="laser_sim_node" name="laser_simulator" output="screen">
+    <rosparam file="$(find laser_simulator)/config/perspective_laser.yaml" command="load"/>
+    <param name="if_perspective" value="true"/>
+    <param name="pc_resolution" value="0.1"/>
+    <param name="sensing_horizon" value="$(arg detection_range)"/>
+    <param name="map_topic" value="/pool_obstacles/cloud"/>
+    <param name="odom_topic" value="/gazebo_bridge/car_state"/>
+  </node>
+
+  <!-- planner: same configs as robot:=rov_holo, map = the pool -->
+  <node name="global_planning" pkg="plan_manager" type="global_planning" output="screen">
+    <rosparam file="$(find front_end)/config/jps3ms.yaml" command="load"/>
+    <rosparam file="$(find plan_manager)/config/car3ms.yaml" command="load"/>
+    <rosparam file="$(find back_end)/config/global_planning3ms.yaml" command="load"/>
+    <rosparam file="$(find plan_env)/config/mapsim.yaml" command="load"/>
+    <rosparam file="$(find plan_manager)/config/robot_rov.yaml" command="load"/>
+    <rosparam file="$(find plan_manager)/config/rov_thrusters.yaml" command="load"/>
+    <rosparam file="$(find plan_manager)/config/robot_rov_holo.yaml" command="load"/>
+    <param name="start_x" value="$(arg start_x)"/>
+    <param name="start_y" value="$(arg start_y)"/>
+    <param name="start_yaw" value="$(arg start_yaw)"/>
+    <param name="if_fix_final" value="false"/>
+    <param name="final_x" value="0.0"/>
+    <param name="final_y" value="0.0"/>
+    <param name="final_yaw" value="0.0"/>
+    <param name="replan_time" value="5000"/>
+    <param name="max_replan_time" value="0.05"/>
+    <param name="gridmap_interval" value="0.1"/>
+    <param name="path_gridmap_interval" value="0.05"/>
+    <param name="detection_range" value="$(arg detection_range)"/>
+    <param name="global_x_lower" value="-1.0"/>
+    <param name="global_x_upper" value="26.0"/>
+    <param name="global_y_lower" value="-1.0"/>
+    <param name="global_y_upper" value="51.0"/>
+    <param name="if_perspective" value="true"/>
+    <param name="if_cirSupRaycast" value="false"/>
+    <param name="hrz_limited" value="false"/>
+    <param name="hrz_laser_range_dgr" value="90.0"/>
+    <param name="ICR_yr" value="-0.3"/>
+    <param name="ICR_yl" value="0.3"/>
+    <param name="ICR_xv" value="0.2"/>
+    <param name="if_standard_diff" value="true"/>
+    <remap from="~local_pointcloud" to="/laser_simulator/local_pointcloud"/>
+    <remap from="~odom" to="$(arg odom_topic)"/>
+    <remap from="~traj" to="$(arg traj_topic)"/>
+  </node>
+
+  <!-- holonomic NMPC + thruster allocation (depth / attitude targets and velocity feedback from the bridge) -->
+  <include file="$(find holo_control)/launch/holo_control.launch">
+    <arg name="traj_topic" value="$(arg traj_topic)"/>
+    <arg name="odom_topic" value="$(arg odom_topic)"/>
+    <arg name="gazebo" value="true"/>
+  </include>
+
+  <node if="$(arg rviz)" name="rviz" pkg="rviz" type="rviz" args="-d $(find plan_manager)/rviz/planner_sim.rviz" output="log"/>
+</launch>

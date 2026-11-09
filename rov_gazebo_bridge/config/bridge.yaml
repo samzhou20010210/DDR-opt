@@ -1,0 +1,35 @@
+# rov_gazebo_bridge: DDR-opt rov_holo <-> uwv-simulator Gazebo (ROV_V4). All gains / physics are ESTIMATES.
+
+# Pool frame (DDR-opt "world"): origin at the pool corner, axes as Gazebo's world.
+#   pool = gazebo_world + offset; the 25 x 50 m pool (Gazebo x in [-12.5, 12.5], y in [-25, 25]) becomes
+#   x in [0, 25], y in [0, 50].
+pool_offset: [12.5, 25.0]
+pool_size:   [25.0, 50.0]
+
+# DDR-opt thruster name (rov_thrusters.yaml, CAD instance) -> Gazebo thruster name (rov_v4.xacro).
+# Matched by NAME: the two lists are in different orders. Geometry checked identical (handoff, 2026-11-08).
+thruster_map:
+  Thruster_T500_V4-4: h_front_port
+  Thruster_T500_V4-3: h_front_star
+  Thruster_T500_V4-2: h_rear_port
+  Thruster_T500_V4-1: h_rear_star
+  Thruster_T500_V4-8: v_front_port
+  Thruster_T500_V4-7: v_front_star
+  Thruster_T500_V4-6: v_rear_port
+  Thruster_T500_V4-5: v_rear_star
+thrust_timeout: 0.2          # s without /thruster_allocation/thrust -> all thrusters 0 (Gazebo keeps the last command)
+
+# Depth / attitude hold (DDR-opt plans in the plane only). Outputs the heave force Z and roll / pitch moments K, M
+# (body frame, about the CoM) that thruster_allocation must produce with the vertical thrusters.
+depth:
+  target:     1.0            # m below the surface (positive down); topic ~depth_target (Float64) changes it
+  kp:         200.0          # N/m
+  ki:         20.0           # N/(m s)
+  kd:         0.0            # N/(m/s)   (heave drag 330 N/(m/s) already damps strongly)
+  i_limit:    30.0           # N
+  max_force:  100.0          # N
+  buoyancy_ff: -4.905        # N: 1% net buoyancy of the 50 kg model (rov_v4.xacro buoyancy_compensation 1.01)
+attitude:
+  kp:         40.0           # N m/rad
+  kd:         10.0           # N m/(rad/s)
+  max_moment: 20.0           # N m

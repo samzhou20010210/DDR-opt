@@ -6,6 +6,10 @@
        pool camera) - the ICR-EKF of the car estimates wheel-slip parameters and is not meaningful for thrusters. -->
   <arg name="traj_topic" default="/planner/traj_poly"/>
   <arg name="odom_topic" default="/simulation/PoseOdomPub"/>
+  <!-- gazebo:=true (rov_gazebo_bridge): the allocation holds heave / roll / pitch at the bridge's targets (~zkm)
+       and closes a body-velocity loop on the odometry. false (2D simulator) = unchanged behaviour. -->
+  <arg name="gazebo" default="false"/>
+  <arg name="zkm_topic" default="/gazebo_bridge/zkm"/>
 
   <node name="holo_nmpc" pkg="holo_control" type="holo_nmpc" output="screen">
     <rosparam file="$(find holo_control)/config/holo_nmpc.yaml" command="load"/>
@@ -21,5 +25,9 @@
     <rosparam file="$(find holo_control)/config/thruster_allocation.yaml" command="load"/>
     <remap from="~cmd" to="/simulation/HoloCmd"/>
     <remap from="~accel" to="/holo_nmpc/accel"/>
+    <param if="$(arg gazebo)" name="zkm_target/enable" value="true"/>
+    <param if="$(arg gazebo)" name="velocity_feedback/enable" value="true"/>
+    <remap if="$(arg gazebo)" from="~zkm" to="$(arg zkm_topic)"/>
+    <remap if="$(arg gazebo)" from="~odom" to="$(arg odom_topic)"/>
   </node>
 </launch>

@@ -97,6 +97,9 @@ void HoloPlanner::buildAllocationFacets()
     param("thrusters/f_max", fmax, 40.0);
     param("thrusters/f_min", fmin, -30.0);
     param("holo/alloc/reserve", reserve, 0.2);
+    std::vector<double> mref;
+    param("thrusters/moment_ref", mref, std::vector<double>{0.0, 0.0, 0.0});   // moments about this point (CoM)
+    const double rx = mref.size() > 0 ? mref[0] : 0.0, ry = mref.size() > 1 ? mref[1] : 0.0;
     if (tx.empty() || tx.size() != ty.size() || tx.size() != ax.size() || tx.size() != ay.size() || tx.size() != az.size())
     {
         ROS_ERROR("[holo] thruster layout missing or inconsistent: allocation constraint disabled");
@@ -108,7 +111,7 @@ void HoloPlanner::buildAllocationFacets()
     for (size_t k = 0; k < tx.size(); k++)
     {
         if (std::fabs(az[k]) > 0.5) continue;  // vertical thruster: no planar contribution
-        const Eigen::Vector3d b(ax[k], ay[k], tx[k] * ay[k] - ty[k] * ax[k]);  // (X, Y, N) per newton of thrust
+        const Eigen::Vector3d b(ax[k], ay[k], (tx[k] - rx) * ay[k] - (ty[k] - ry) * ax[k]);  // (X, Y, N) per newton
         centre += b * 0.5 * (fmax + fmin);
         gens.push_back(b * 0.5 * (fmax - fmin));
     }

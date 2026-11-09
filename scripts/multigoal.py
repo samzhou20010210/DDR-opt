@@ -18,6 +18,7 @@ For rov_holo only:
 - thruster allocation: saturation, thrusters at a limit, and residual heave / roll / pitch.
 
   python3 multigoal.py --out DIR [--robot rov_holo|rov|car] [--goals x y yaw ...] [--timeout S]
+                       [--gazebo]   (rov_holo in Gazebo: rov_gazebo_bridge topics, pool walls, depth hold)
 Exit 0 = every goal reached (and, for rov_holo, no command outside the limits). Writes DIR/multigoal.json.
 """
 import argparse
@@ -34,7 +35,7 @@ from geometry_msgs.msg import PoseStamped, Twist, WrenchStamped
 from nav_msgs.msg import Odometry, Path
 from rosgraph_msgs.msg import Log
 from sensor_msgs.msg import PointCloud2
-from std_msgs.msg import Bool, Float64MultiArray
+from std_msgs.msg import Bool, Float64, Float64MultiArray
 from carstatemsgs.msg import Polynome, CarState
 from tf.transformations import quaternion_from_euler, euler_from_quaternion
 
@@ -42,6 +43,10 @@ from tf.transformations import quaternion_from_euler, euler_from_quaternion
 DEFAULT_GOALS = [5.77, -7.78, 1.58, 4.12, 8.42, -0.28, 7.57, 5.88, -1.95, 4.87, 8.01, -0.52, 8.32, 6.72, -1.69,
                  7.45, -2.35, 2.0, 2.38, 7.55, 0.0, 5.24, -5.22, 0.0, -3.8, 7.1, 0.0, -9.4, 6.1, 0.0, 5.64, -0.61, 0.0,
                  -3.74, -4.21, 0.0, -4.66, -1.04, 0.0, 0.09, 1.02, 0.0]
+# Gazebo pool (rov_gazebo_bridge, frame = pool corner, pool x in [0, 25], y in [0, 50]): 14 goals over the pool
+GAZEBO_GOALS = [12.0, 15.0, 1.57, 20.0, 40.0, 0.0, 3.0, 45.0, 3.14, 22.0, 5.0, -1.57, 12.5, 25.0, 0.0, 2.0, 2.0, 0.785,
+                23.0, 48.0, 1.57, 8.0, 30.0, -1.0, 18.0, 12.0, 2.5, 5.0, 20.0, 0.0, 20.0, 25.0, 3.14, 1.5, 40.0, -1.57,
+                15.0, 47.0, 0.0, 5.0, 5.0, 0.0]
 NMPC_BUDGET_MS = 20.0   # 50 Hz control rate
 
 
@@ -63,8 +68,9 @@ def stats(xs, nd=3):
 
 
 class Recorder:
-    def __init__(self, holo):
+    def __init__(self, holo, topics):
         self.holo = holo
+        self.depth = []       # (t, depth)
         self.pose = []        # (t, x, y, yaw)  50 Hz ground truth
         self.odom = []        # (t, vx, vy, w)  holo: body twist
         self.carstate = []    # (t, v, w)       diff
@@ -75,14 +81,16 @@ class Recorder:
         self.endpoint, self.ratio, self.attempts = [], [], []
         self.drops, self.snaps, self.estops = [], [], []
         self.obst = None
-        rospy.Subscriber("/simulation/PosePosePub", PoseStamped, self.cb_pose, queue_size=500)
+        rospy.Subscriber(topics["pose"], PoseStamped, self.cb_pose, queue_size=500)
+        if topics.get("depth"):
+            rospy.Subscriber(topics["depth"], Float64, lambda m: self.depth.append((rospy.get_time(), m.data)), queue_size=500)
         rospy.Subscriber("/planner/traj_poly", Polynome, self.cb_traj, queue_size=20)
         rospy.Subscriber("/visualizer/mincoPath", Path, self.cb_path, queue_size=20)
         rospy.Subscriber("/planner/emergency_stop", Bool, lambda m: m.data and self.estops.append(rospy.get_time()))
         rospy.Subscriber("/rosout_agg", Log, self.cb_log, queue_size=500)
-        rospy.Subscriber("/global_map/gridmap", PointCloud2, self.cb_map, queue_size=1)
+        rospy.Subscriber(topics["map"], PointCloud2, self.cb_map, queue_size=1)
         if holo:
-            rospy.Subscriber("/simulation/PoseOdomPub", Odometry, self.cb_odom, queue_size=500)
+            rospy.Subscriber(topics["odom"], Odometry, self.cb_odom, queue_size=500)
             rospy.Subscriber("/simulation/HoloCmd", Twist, self.cb_cmd, queue_size=500)
             rospy.Subscriber("/thruster_allocation/saturated", Bool, self.cb_sat, queue_size=500)
             rospy.Subscriber("/thruster_allocation/thrust", Float64MultiArray, self.cb_thrust, queue_size=500)
@@ -177,13 +185,25 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--out", required=True)
     p.add_argument("--robot", default="rov_holo")
-    p.add_argument("--goals", nargs="+", type=float, default=DEFAULT_GOALS)
+    p.add_argument("--goals", nargs="+", type=float, default=None)
     p.add_argument("--timeout", type=float, default=150.0)
     p.add_argument("--pos-tol", type=float, default=0.3)
     p.add_argument("--yaw-tol", type=float, default=0.3)
+    p.add_argument("--gazebo", action="store_true")
     a = p.parse_args(rospy.myargv()[1:])
     holo = a.robot == "rov_holo"
+    if a.goals is None:
+        a.goals = GAZEBO_GOALS if a.gazebo else DEFAULT_GOALS
     os.makedirs(a.out, exist_ok=True)
+    if a.gazebo:   # rospy picks wall or sim time at init_node: wait until Gazebo's launch has set /use_sim_time
+        import rosgraph
+        def _sim_time_set():
+            try:
+                return rosgraph.Master("/multigoal").hasParam("/use_sim_time")
+            except Exception:   # master not up yet
+                return False
+        while not _sim_time_set():
+            __import__("time").sleep(0.2)
     rospy.init_node("multigoal", anonymous=True)
     key = "/holo_nmpc/holo/max_vy" if holo else "/global_planning"
     while not rospy.is_shutdown() and not rospy.has_param(key):
@@ -193,7 +213,11 @@ def main():
     if holo:
         vert = [i for i, z in enumerate(rospy.get_param("/thruster_allocation/thrusters/axis_z")) if abs(z) > 0.5]
         fmax, fmin = rospy.get_param("/thruster_allocation/thrusters/f_max"), rospy.get_param("/thruster_allocation/thrusters/f_min")
-    R = Recorder(holo)
+    topics = ({"pose": "/gazebo_bridge/pose", "odom": "/gazebo_bridge/odom", "map": "/pool_obstacles/cloud",
+               "depth": "/gazebo_bridge/depth"} if a.gazebo else
+              {"pose": "/simulation/PosePosePub", "odom": "/simulation/PoseOdomPub", "map": "/global_map/gridmap"})
+    depth_target = rospy.get_param("/gazebo_bridge/depth/target", None) if a.gazebo else None
+    R = Recorder(holo, topics)
     while not R.pose and not rospy.is_shutdown():
         rospy.sleep(0.1)
     rospy.sleep(4.0)  # map build
@@ -311,7 +335,11 @@ def main():
                          "osqp_iter": stats([n[3] for n in nm], 1), "failed": sum(1 for n in nm if n[4] < 0.5),
                          "period_ms": stats([n[5] for n in nm if n[5] > 0]),
                          "over_budget": sum(1 for n in nm if n[1] > NMPC_BUDGET_MS), "cycles": len(nm)}})
-        else:
+        if a.gazebo:
+            dp = [d[1] for d in win(R.depth)]
+            r["depth_err_max_m"] = round(max(abs(d - depth_target) for d in dp), 3) if dp else None
+            r["depth_err_mean_m"] = round(float(np.mean([abs(d - depth_target) for d in dp])), 3) if dp else None
+        if not holo:
             cs = win(R.carstate)
             r.update({"peak_v": round(max((c[1] for c in cs), default=0), 3),
                       "peak_abs_w": round(max((abs(c[2]) for c in cs), default=0), 3)})
